@@ -9,5 +9,6 @@ mod max;
 mod min;
 mod nth;
 mod sum;
+mod count_distinct;
 #[cfg(feature = "parquet")]
 mod to_arrow;

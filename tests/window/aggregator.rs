@@ -181,3 +181,42 @@ fn test_map_window() {
         }
     });
 }
+
+#[test]
+fn test_distinct_count_tumbling(){
+    TestHelper::local_remote_env(|env|{
+        let s = [0,1,1,2,3,4,5,6,7,8,9,9,9]; //count should be 10
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+        .stream(source)
+        .window_all(CountWindow::tumbling(13))
+        .count_distinct()
+        .drop_key()    
+        .collect_vec();
+        env.execute_blocking();
+        if let Some(res) = res.get() {
+            assert_eq!(
+                res,vec![10]
+            );
+        }
+    });
+} 
+#[test]
+fn test_distinct_count_sliding(){
+        TestHelper::local_remote_env(|env|{
+        let s = [0,1,1,2,3,4,5,6,7,8,9,9,9,0,10];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+        .stream(source)
+        .window_all(CountWindow::sliding(3,1))
+        .count_distinct()
+        .drop_key()    
+        .collect_vec();
+        env.execute_blocking();
+        if let Some(res) = res.get() {
+            assert_eq!(
+                res,vec![2,2,3,3,3,3,3,3,3,2,1,2,3]
+            );
+        }
+    });
+}
