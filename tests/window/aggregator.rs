@@ -220,3 +220,24 @@ fn test_distinct_count_sliding(){
         }
     });
 }
+
+#[test]
+ fn test_sum_if(){
+    TestHelper::local_remote_env(|env|{
+        let s = [0,1,2,3,4,5,6,7,8,9];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+        .stream(source)
+        .window_all(CountWindow::tumbling(10))
+        .sum_if::<_,i32>(|x| *x > 5 )
+        .drop_key()
+        .collect_vec();
+    env.execute_blocking();
+    if let Some(res) = res.get(){
+        assert_eq!(
+            res,vec![30]
+        )
+    } 
+
+    });
+} 
