@@ -94,6 +94,7 @@ pub mod source;
 mod start;
 pub mod window;
 mod zip;
+pub mod streaming_window;
 
 /// Marker trait that all the types inside a stream should implement.
 pub trait Data: Clone + Send + 'static {}

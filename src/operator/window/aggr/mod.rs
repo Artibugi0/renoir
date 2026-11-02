@@ -11,5 +11,8 @@ mod nth;
 mod sum;
 mod sum_if;
 mod count_distinct;
+mod to_first_class;
+pub (crate) mod to_streaming_window;
+
 #[cfg(feature = "parquet")]
 mod to_arrow;
