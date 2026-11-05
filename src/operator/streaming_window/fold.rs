@@ -8,6 +8,9 @@ use crate::operator::streaming_window::streamingwindow::WindowMsg;
 use crate::operator::{Data, Operator, StreamElement, Timestamp};
 use crate::scheduler::ExecutionMetadata;
 
+//Questa implementazione di fold mantiene una hashmap di accumulatori
+//ognuno associato ad una particolare finestra
+//il resto dell'implementazione è simile a quella usata per stream normali
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub struct Fold<O: Send + Clone, F, Op,I>
@@ -19,6 +22,7 @@ where
     #[derivative(Debug = "ignore")]
     fold: F,
     init: O,
+    //hashmap con chiave id della finestra
     accumulators: HashMap<u64,O>,
     timestamp: Option<Timestamp>,
     max_watermark: Option<Timestamp>,
@@ -75,35 +79,49 @@ where
     fn next(&mut self) -> StreamElement<(u64,O)> {
         while !self.received_end {
             match self.prev.next() {
+
+                //match si aspetta elementi della finestra, accumulatori creati/aggiornati in base all'id della finestra
+                //associato all'elemento
                 StreamElement::Item((id, WindowMsg::Item(x))) => {
                     let acc = 
                         self.accumulators
                         .entry(id)
-                        .or_insert(self.init.clone());
+                        .or_insert_with(|| self.init.clone());
                     (self.fold)(acc,x); 
                 }
+                //timestamp gestiti come nell'implementazione di base
                 StreamElement::Timestamped((id, WindowMsg::Item(x)), ts) => {
                     self.timestamp = Some(self.timestamp.unwrap_or(ts).max(ts));
                     let acc = 
                         self.accumulators
                         .entry(id)
-                        .or_insert(self.init.clone());
+                        .or_insert_with(|| self.init.clone());
                     (self.fold)(acc,x); 
                 }
+                //se ricevo windowclosed so che teoricamente elementi della finestra sono esauriti
+                //sputo fuori l'accumulatore completato e cancello l'entry dalla mappa
                 StreamElement::Item((id,WindowMsg::WindowClosed))  => {
                     if let Some(acc) = self.accumulators.remove(&id){
                         return StreamElement::Item((id,acc))
+                        // (domanda forse stupida) può succedere che window closed sia ricevuto prima dell'esaurimento degli elementi? 
+                        // la tupla che ritorno va bene in questo formato? (id finestra, risultato della riduzione della finestra)
                     }
                    
                 }
+                
+                //stessa cosa ma aggiorno anche il timestamp se necessario e lo ritorno insieme ai valori
                 StreamElement::Timestamped((id,WindowMsg::WindowClosed),ts ) =>{
                     self.timestamp = Some(self.timestamp.unwrap_or(ts).max(ts));
                     if let Some(acc) = self.accumulators.remove(&id){
+
+                        //questo Some sul timestamp è necessario?
                         if let Some(ts) = self.timestamp.take() {
                             return StreamElement::Timestamped((id,acc), ts);
                         }
                     }
-                }               
+                }    
+                //logica invariata     
+
                 StreamElement::Terminate => self.received_end = true,
                 StreamElement::FlushAndRestart => {
                     self.received_end = true;
@@ -116,15 +134,6 @@ where
                 StreamElement::FlushBatch => {}
             }
         }
-
-        // If there is an accumulated value, return it
-        /*if let Some(acc) = self.accumulator.take() {
-            if let Some(ts) = self.timestamp.take() {
-                return StreamElement::Timestamped(acc, ts);
-            } else {
-                return StreamElement::Item(acc);
-            }
-        }*/
 
         // If watermark were received, send one downstream
         if let Some(ts) = self.max_watermark.take() {

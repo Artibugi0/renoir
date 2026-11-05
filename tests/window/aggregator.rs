@@ -238,6 +238,60 @@ fn test_distinct_count_sliding(){
             res,vec![30]
         )
     } 
-
     });
-} 
+}
+
+#[test]
+fn streaming_window_test() {
+    TestHelper::local_remote_env(|env| {
+        let s = [0,1,2,3,4,5,6,7,8,9];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()         
+            .filter(|n| n % 2 == 0)
+            .fold(0, |acc, x| *acc += x)
+            .drop_key()
+            .collect_vec();      
+
+
+        env.execute_blocking();
+
+        if let Some(mut res) = res.get() {
+            res.sort();
+            assert_eq!(res, vec![6,14]);
+        }
+    });
+}
+
+//#[test]
+/*fn streaming_window_key_per_window() {
+    TestHelper::local_remote_env(|env| {
+        let source = IteratorSource::new((0u32..10).into_iter());
+
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()
+            .close()
+            .collect_vec();             // (id_finestra, elem)
+
+        env.execute_blocking();
+
+        if let Some(res) = res.get() {
+            let mut groups: std::collections::BTreeMap<u64, Vec<u32>> = Default::default();
+            for (id, v) in res {
+                groups.entry(id).or_default().push(v);
+            }
+            let mut contents: Vec<Vec<u32>> = groups
+                .into_values()
+                .map(|mut v| { v.sort(); v })
+                .collect();
+            contents.sort();
+
+            // due finestre, ognuna con la propria chiave
+            assert_eq!(contents, vec![vec![0, 1, 2, 3, 4], vec![5, 6, 7, 8, 9]]);
+        }
+    });
+}*/

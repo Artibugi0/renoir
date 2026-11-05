@@ -5,6 +5,8 @@ use crate::operator::streaming_window::streamingwindow::WindowMsg;
 use crate::operator::{Operator, StreamElement};
 use crate::scheduler::ExecutionMetadata;
 
+//variante di filter per StreamingWindow, adattata per ricevere gli elementi della enum WindowMsg
+//cambiano i generici utilizzati,manca qualcosa/va modificato?
 #[derive(Clone)]
 pub struct Filter<Op, Predicate,I>
 where
