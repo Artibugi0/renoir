@@ -264,6 +264,33 @@ fn streaming_window_test() {
         }
     });
 }
+#[test]
+fn streaming_window_test_multiple() {
+    TestHelper::local_remote_env(|env| {
+        let s = [0,1,2,3,4,5,6,7,8,9,10,11];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(4))
+            .to_streaming_window()
+            .filter(|n| n % 2 == 0)
+            .window(CountWindow::tumbling(2))
+            .to_streaming_window()         
+            .fold(0, |acc, x| *acc += x)
+            .drop_key()
+            .collect_vec();     
+
+
+        env.execute_blocking();
+
+        if let Some(mut res) = res.get() {
+            res.sort();
+            assert_eq!(res, vec![2,10,18]);
+        }
+    });
+}
+
+
 
 //#[test]
 /*fn streaming_window_key_per_window() {

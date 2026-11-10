@@ -45,8 +45,8 @@ pub trait WindowAccumulator: Clone + Send + 'static {
 
 #[derive(Clone)]
 pub(crate) struct KeyedWindowManager<Key, In, Out, W: WindowManager> {
-    windows: HashMap<Key, W, GroupHasherBuilder>,
-    init: W,
+    pub(crate) windows: HashMap<Key, W, GroupHasherBuilder>,
+    pub(crate) init: W,
     _in: PhantomData<In>,
     _out: PhantomData<Out>,
 }
@@ -244,7 +244,16 @@ where
         }
     }
 }
-
+impl<Key, In, Out, W: WindowManager> KeyedWindowManager<Key, In, Out, W> {
+    pub(crate) fn new(init: W) -> Self {
+        Self {
+            windows: HashMap::default(),
+            init,
+            _in: PhantomData,
+            _out: PhantomData,
+        }
+    }
+}
 impl<Key, Out, WindowDescr, OperatorChain> WindowedStream<OperatorChain, Out, WindowDescr>
 where
     WindowDescr: WindowDescription<Out>,
@@ -268,12 +277,7 @@ where
         let init = self.descr.build::<A>(accumulator);
 
         let manager: KeyedWindowManager<Key, Out, NewOut, WindowDescr::Manager<A>> =
-            KeyedWindowManager {
-                windows: HashMap::default(),
-                init,
-                _in: PhantomData,
-                _out: PhantomData,
-            };
+            KeyedWindowManager::new(init);
 
         stream // .add_operator(Reorder::new)
             .add_operator(|prev| WindowOperator::new(prev, name.into(), manager))

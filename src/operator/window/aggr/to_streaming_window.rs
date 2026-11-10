@@ -1,4 +1,4 @@
-use crate::{ WindowedStream,operator::{Data, DataKey, Operator,streaming_window::streamingwindow::{FirstClassWindowedStream, WindowMsg}, window::{WindowAccumulator, WindowDescription}}};
+use crate::{ WindowedStream, operator::{Data, DataKey, Operator, streaming_window::streamingwindow::{FirstClassWindowedStream, FirstClassWindowedWithDescr, WindowMsg}, window::{WindowAccumulator, WindowDescription}}};
 use std::fmt::Debug;
 use flume::Sender;
 use crate::block::Replication;
@@ -70,6 +70,37 @@ where
         //Crea canale per poter inviare gli elementi al nuovo blocco
         let (tx, source) = 
             ChannelSource::<(u64, WindowMsg<Out>)>::new(CHANNEL_SIZE, Replication::One);
+
+        let ctx = self.inner.0.ctx.clone();
+        
+        //Chiudi blocco corrente con for_each che scarta l'output vuoto del nostro operatore (Key,())
+        self.add_window_operator("to_streaming_window", WindowS::new(tx))
+            .for_each(|_| {});
+        
+        
+        let block = ctx
+            .lock()
+            .new_block(source, Default::default(), Default::default());
+        let downstream = Stream::new(ctx, block);
+
+        FirstClassWindowedStream(downstream)
+    }
+}
+
+impl<Op, WinOut, WinDescr, Key,In> FirstClassWindowedWithDescr<Op,WinOut, WinDescr>
+where
+    WinDescr: WindowDescription<In> + 'static,
+    Op: Operator<Out = (Key, WindowMsg<In>)> + 'static,
+    Key: DataKey,
+    WinOut: 'static,
+    In: Data + Debug,
+{
+    pub fn to_streaming_window(
+        self,
+    ) -> FirstClassWindowedStream<impl Operator<Out = (u64, WindowMsg<In>)>> {
+        //Crea canale per poter inviare gli elementi al nuovo blocco
+        let (tx, source) = 
+            ChannelSource::<(u64, WindowMsg<In>)>::new(CHANNEL_SIZE, Replication::One);
 
         let ctx = self.inner.0.ctx.clone();
         

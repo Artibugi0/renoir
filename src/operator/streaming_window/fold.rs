@@ -23,7 +23,7 @@ where
     fold: F,
     init: O,
     //hashmap con chiave id della finestra
-    accumulators: HashMap<u64,O>,
+    accumulators: HashMap<u64,(O, Option<Timestamp>)>,
     timestamp: Option<Timestamp>,
     max_watermark: Option<Timestamp>,
     received_end: bool,
@@ -83,43 +83,33 @@ where
                 //match si aspetta elementi della finestra, accumulatori creati/aggiornati in base all'id della finestra
                 //associato all'elemento
                 StreamElement::Item((id, WindowMsg::Item(x))) => {
-                    let acc = 
+                    let (acc,_) = 
                         self.accumulators
                         .entry(id)
-                        .or_insert_with(|| self.init.clone());
+                        .or_insert_with(|| (self.init.clone(),None));
                     (self.fold)(acc,x); 
                 }
                 //timestamp gestiti come nell'implementazione di base
                 StreamElement::Timestamped((id, WindowMsg::Item(x)), ts) => {
                     self.timestamp = Some(self.timestamp.unwrap_or(ts).max(ts));
-                    let acc = 
+                    let (acc,t) = 
                         self.accumulators
                         .entry(id)
-                        .or_insert_with(|| self.init.clone());
+                        .or_insert_with(|| (self.init.clone(),None));
+                    *t = Some(t.unwrap_or(ts).max(ts));
                     (self.fold)(acc,x); 
                 }
                 //se ricevo windowclosed so che teoricamente elementi della finestra sono esauriti
                 //sputo fuori l'accumulatore completato e cancello l'entry dalla mappa
-                StreamElement::Item((id,WindowMsg::WindowClosed))  => {
-                    if let Some(acc) = self.accumulators.remove(&id){
-                        return StreamElement::Item((id,acc))
-                        // (domanda forse stupida) può succedere che window closed sia ricevuto prima dell'esaurimento degli elementi? 
-                        // la tupla che ritorno va bene in questo formato? (id finestra, risultato della riduzione della finestra)
-                    }
-                   
+                StreamElement::Item((id, WindowMsg::WindowClosed))
+                | StreamElement::Timestamped((id, WindowMsg::WindowClosed), _) => {
+                if let Some((acc, ts)) = self.accumulators.remove(&id) {
+                    return match ts {
+                        Some(ts) => StreamElement::Timestamped((id, acc), ts),
+                        None => StreamElement::Item((id, acc)),
+                    };
                 }
-                
-                //stessa cosa ma aggiorno anche il timestamp se necessario e lo ritorno insieme ai valori
-                StreamElement::Timestamped((id,WindowMsg::WindowClosed),ts ) =>{
-                    self.timestamp = Some(self.timestamp.unwrap_or(ts).max(ts));
-                    if let Some(acc) = self.accumulators.remove(&id){
-
-                        //questo Some sul timestamp è necessario?
-                        if let Some(ts) = self.timestamp.take() {
-                            return StreamElement::Timestamped((id,acc), ts);
-                        }
-                    }
-                }    
+            }                
                 //logica invariata     
 
                 StreamElement::Terminate => self.received_end = true,
