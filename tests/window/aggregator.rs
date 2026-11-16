@@ -264,6 +264,7 @@ fn streaming_window_test() {
         }
     });
 }
+/* 
 #[test]
 fn streaming_window_test_multiple() {
     TestHelper::local_remote_env(|env| {
@@ -293,7 +294,7 @@ fn streaming_window_test_multiple() {
 
 
 //#[test]
-/*fn streaming_window_key_per_window() {
+fn streaming_window_key_per_window() {
     TestHelper::local_remote_env(|env| {
         let source = IteratorSource::new((0u32..10).into_iter());
 

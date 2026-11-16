@@ -1,5 +1,5 @@
-use crate::{ WindowedStream, operator::{Data, DataKey, Operator, streaming_window::streamingwindow::{FirstClassWindowedStream, FirstClassWindowedWithDescr, WindowMsg}, window::{WindowAccumulator, WindowDescription}}};
-use std::fmt::Debug;
+use crate::{ WindowedStream, operator::{Data, DataKey, Operator, streaming_window::streamingwindow::{Depth, FirstClassWindowedStream, FirstClassWindowedWithDescr, Level, WindowMsg, Zero}, window::{WindowAccumulator, WindowDescription}}};
+use std::{fmt::Debug};
 use flume::Sender;
 use crate::block::Replication;
 use crate::operator::source::ChannelSource;
@@ -12,10 +12,12 @@ use std::sync::Arc;
 //alle dimensioni fornite alla finestra nel momento della sua costruzione
 const CHANNEL_SIZE: usize = 1024; 
 
-pub struct WindowS<I: Send + 'static> {
+pub struct WindowS<I: Send + 'static, D: Depth> {
     
     //ogni clone ha un sender che invia tutto allo stesso blocco
-    sender: Sender<(u64, WindowMsg<I>)>,    
+    sender: Sender<((D::Path,u64), WindowMsg<I>)>,
+
+    window_path: D::Path,    
     
     next_id: Arc<AtomicU64>, // condiviso da tutti i cloni
     
@@ -23,40 +25,44 @@ pub struct WindowS<I: Send + 'static> {
     id: u64,                 
 }
 
-impl<I: Send + 'static> WindowS<I> {
-    pub fn new(sender: Sender<(u64, WindowMsg<I>)>) -> Self {
-        Self { sender, next_id: Arc::new(AtomicU64::new(1)), id: 0 }
+impl<I: Send + 'static, D:Depth> WindowS<I,D> {
+    pub fn new(sender: Sender<((D::Path,u64), WindowMsg<I>)>,window_path:D::Path) -> Self {
+        Self { sender,window_path, next_id: Arc::new(AtomicU64::new(1)), id: 0 }
     }
 }
 
-impl<I: Send + 'static> Clone for WindowS<I> {
+impl<I: Send + 'static, D: Depth> Clone for WindowS<I,D> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
+            window_path: self.window_path.clone(),
             next_id: self.next_id.clone(),
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
         }
     }
 }
 
-impl<I> WindowAccumulator for WindowS<I>
+impl<I,D> WindowAccumulator for WindowS<I,D>
 where
-    I: Data + Send + Clone
+    I: Data,
+    D: Depth + 'static
 {
     type In = I;
     type Out = ();
 
     #[inline]
     fn process(&mut self, el: &Self::In) {
-        //capire come gestire le chiavi
-        self.sender.send((self.id, WindowMsg::Item(el.clone()))).unwrap();
+        let key = (self.window_path.clone(), self.id);
+        self.sender.send((key, WindowMsg::Item(el.clone()))).unwrap();
     }
 
     fn output(self) {
-        self.sender.send((self.id,WindowMsg::WindowClosed)).unwrap();
+        let key = (self.window_path.clone(), self.id);
+        self.sender.send((key,WindowMsg::WindowClosed)).unwrap();
     }
 }
 
+//versione per entrare nel contesto di StreamingWindow
 impl<Key, Out, WindowDescr, OperatorChain> WindowedStream<OperatorChain, Out, WindowDescr>
 where
     WindowDescr: WindowDescription<Out> + 'static,
@@ -64,17 +70,15 @@ where
     Key: DataKey,
     Out: Data + Debug,
 {
-    pub fn to_streaming_window(
-        self,
-    ) -> FirstClassWindowedStream<impl Operator<Out = (u64, WindowMsg<Out>)>> {
+    pub fn to_streaming_window(self) -> FirstClassWindowedStream<impl Operator<Out = (<Level<Zero> as Depth>::Path, WindowMsg<Out>)>,Level<Zero>,> {
         //Crea canale per poter inviare gli elementi al nuovo blocco
         let (tx, source) = 
-            ChannelSource::<(u64, WindowMsg<Out>)>::new(CHANNEL_SIZE, Replication::One);
+            ChannelSource::<(<Level<Zero> as Depth>::Path, WindowMsg<Out>)>::new(CHANNEL_SIZE, Replication::One);
 
         let ctx = self.inner.0.ctx.clone();
         
         //Chiudi blocco corrente con for_each che scarta l'output vuoto del nostro operatore (Key,())
-        self.add_window_operator("to_streaming_window", WindowS::new(tx))
+        self.add_window_operator("to_streaming_window", WindowS::<Out,Zero>::new(tx,()))
             .for_each(|_| {});
         
         
@@ -83,29 +87,28 @@ where
             .new_block(source, Default::default(), Default::default());
         let downstream = Stream::new(ctx, block);
 
-        FirstClassWindowedStream(downstream)
+        FirstClassWindowedStream::new(downstream)
     }
 }
 
-impl<Op, WinOut, WinDescr, Key,In> FirstClassWindowedWithDescr<Op,WinOut, WinDescr>
+
+//Versione per aumentare la profondità di un livello
+impl<Op, WinOut, WinDescr, D,I> FirstClassWindowedWithDescr<Op,WinOut, WinDescr,Level<D>>
 where
-    WinDescr: WindowDescription<In> + 'static,
-    Op: Operator<Out = (Key, WindowMsg<In>)> + 'static,
-    Key: DataKey,
+    WinDescr: WindowDescription<I> + 'static,
+    D:Depth,
+    Op: Operator<Out = (<Level<D> as Depth>::Path, WindowMsg<I>)> + 'static,
     WinOut: 'static,
-    In: Data + Debug,
+    I: Data + Debug,
 {
-    pub fn to_streaming_window(
-        self,
-    ) -> FirstClassWindowedStream<impl Operator<Out = (u64, WindowMsg<In>)>> {
+    pub fn to_streaming_window(self) -> FirstClassWindowedStream<impl Operator<Out = (<Level<D> as Depth>::Path, WindowMsg<I>)>, Level<Level<D>>> {
         //Crea canale per poter inviare gli elementi al nuovo blocco
         let (tx, source) = 
-            ChannelSource::<(u64, WindowMsg<In>)>::new(CHANNEL_SIZE, Replication::One);
-
+            ChannelSource::<((<Level<D> as Depth>::Path,u64), WindowMsg<I>)>::new(CHANNEL_SIZE, Replication::One);
         let ctx = self.inner.0.ctx.clone();
         
         //Chiudi blocco corrente con for_each che scarta l'output vuoto del nostro operatore (Key,())
-        self.add_window_operator("to_streaming_window", WindowS::new(tx))
+        self.add_window_operator("to_streaming_window", WindowS::new(tx,<Level<D> as Depth>::Path))
             .for_each(|_| {});
         
         
@@ -117,3 +120,4 @@ where
         FirstClassWindowedStream(downstream)
     }
 }
+

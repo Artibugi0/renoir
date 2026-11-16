@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::marker::PhantomData;
 
 use crate::block::{BlockStructure, OperatorStructure};
 use crate::operator::streaming_window::streamingwindow::WindowMsg;
@@ -8,20 +9,19 @@ use crate::scheduler::ExecutionMetadata;
 //variante di filter per StreamingWindow, adattata per ricevere gli elementi della enum WindowMsg
 //cambiano i generici utilizzati,manca qualcosa/va modificato?
 #[derive(Clone)]
-pub struct Filter<Op, Predicate,I>
+pub struct Filter<Op, Predicate,K,I>
 where
-    I: Send,
-    Op: Operator<Out = (u64, WindowMsg<I>)>,
+    Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
 {
     prev: Op,
     predicate: Predicate,
+    marker: PhantomData<(K,I)>
 }
 
-impl<Op, Predicate,I> Display for Filter<Op, Predicate,I>
+impl<Op, Predicate,K,I> Display for Filter<Op,Predicate,K,I>
 where
-    I: Send,
-    Op: Operator<Out = (u64, WindowMsg<I>)>,
+    Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -34,22 +34,23 @@ where
     }
 }
 
-impl<Op, Predicate,I> Filter<Op, Predicate,I>
+impl<Op,Predicate,K,I> Filter<Op,Predicate,K,I>
 where
     I: Send,
-    Op: Operator<Out = (u64, WindowMsg<I>)>,
+    Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
 {
     pub(super) fn new(prev: Op, predicate: Predicate) -> Self {
-        Self { prev, predicate }
+        Self { prev, predicate, marker: PhantomData }
     }
 }
 
 
-impl<Op, Predicate,I> Operator for Filter<Op, Predicate,I>
+impl<Op, Predicate,K,I> Operator for Filter<Op,Predicate,K,I>
 where
     I: Send + Clone,
-    Op: Operator<Out = (u64, WindowMsg<I>)>,
+    K:Send + Clone,
+    Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
     
 {
