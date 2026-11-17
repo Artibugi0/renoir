@@ -2,6 +2,7 @@ use itertools::Itertools;
 
 use renoir::operator::source::IteratorSource;
 use renoir::operator::window::CountWindow;
+use tracing_subscriber::fmt::TestWriter;
 
 use super::utils::TestHelper;
 
@@ -263,6 +264,28 @@ fn streaming_window_test() {
             assert_eq!(res, vec![6,14]);
         }
     });
+}
+#[test]
+fn streaming_window_map_test(){
+    TestHelper::local_remote_env(|env|{
+        let s = [1,2,3,4,5,6,7,8,9,10];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()
+            .map(|x| x*2)
+            .fold(0, |acc, x| *acc += x)
+            .drop_key()
+            .collect_vec();
+                env.execute_blocking();
+
+        if let Some(mut res) = res.get() {
+            res.sort();
+            assert_eq!(res, vec![30,80]);
+        }
+    }
+    );
 }
 /* 
 #[test]

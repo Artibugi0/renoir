@@ -1,14 +1,14 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{VecDeque};
 use std::fmt::Display;
 use std::marker::PhantomData;
 
 use crate::operator::streaming_window::map::Map;
-use crate::{KeyedStream, WindowedStream};
+use crate::{KeyedStream};
 use crate::block::OperatorStructure;
 use crate::operator::{Data, DataKey, StreamElement};
 use crate::operator::streaming_window::filter::Filter;
-use crate::operator::streaming_window::aggr::nested::nested_fold::NestedFold;
-use crate::operator::streaming_window::aggr::simple::fold::Fold;
+use crate::operator::streaming_window::window_operators::fold::NestedFold;
+use crate::operator::streaming_window::window_operators::fold::Fold;
 use crate::operator::window::{KeyedWindowManager, WindowAccumulator, WindowDescription, WindowManager};
 use crate::stream::Stream;
 
@@ -24,16 +24,6 @@ use crate::{operator::Operator, stream::KeyedItem};
 pub enum WindowMsg<I> {
     Item(I),
     WindowClosed,
-}
-impl<I> WindowMsg<I> {
-    /// Riferimento al dato, se è un Item.
-    #[inline]
-    pub(crate) fn item(&self) -> Option<&I> {
-        match self {
-            WindowMsg::Item(x) => Some(x),
-            WindowMsg::WindowClosed => None,
-        }
-    }
 }
 //proposta di Trait per rinforzare la relazione fra lunghezza di chiave e profondità windowed stream
 //evitare lunghezze di chiavi diverse dalla profondità della finestra

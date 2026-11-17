@@ -93,10 +93,12 @@ where
 
 
 //Versione per aumentare la profondità di un livello
+//ha ancora bisogno di essere completata
+
 impl<Op, WinOut, WinDescr, D,I> FirstClassWindowedWithDescr<Op,WinOut, WinDescr,Level<D>>
 where
     WinDescr: WindowDescription<I> + 'static,
-    D:Depth,
+    D:Depth + Debug,
     Op: Operator<Out = (<Level<D> as Depth>::Path, WindowMsg<I>)> + 'static,
     WinOut: 'static,
     I: Data + Debug,
@@ -117,7 +119,8 @@ where
             .new_block(source, Default::default(), Default::default());
         let downstream = Stream::new(ctx, block);
 
-        FirstClassWindowedStream(downstream)
+        FirstClassWindowedStream::new(downstream)
     }
 }
+
 
