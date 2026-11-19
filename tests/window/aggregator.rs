@@ -261,7 +261,7 @@ fn streaming_window_test() {
 #[test]
 fn streaming_window_group_test() {
     TestHelper::local_remote_env(|env| {
-        let source = ParallelIteratorSource::new(0..100);
+        let source = IteratorSource::new(0..100);
         let res = env
             .stream(source)
             .group_by(|x| x / 10)
