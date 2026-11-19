@@ -130,7 +130,7 @@ impl<T: Data, F: Fn(&T) -> TransactionOp + Data> WindowDescription<T> for Transa
     type Manager<A: WindowAccumulator<In = T>> = TransactionWindowManager<A, F>;
 
     #[inline]
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
         TransactionWindowManager {
             init: accumulator,
             f: self.logic.clone(),

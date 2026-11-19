@@ -133,7 +133,7 @@ impl<T: Data> WindowDescription<T> for EventTimeWindow {
     type Manager<A: WindowAccumulator<In = T>> = EventTimeWindowManager<A>;
 
     #[inline]
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
         EventTimeWindowManager {
             init: accumulator,
             size: self.size,
@@ -161,7 +161,7 @@ mod tests {
         let window = EventTimeWindow::sliding(5, 4);
 
         let fold = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         let mut received = Vec::new();
         for i in 1..100i64 {
@@ -188,7 +188,7 @@ mod tests {
         let window = EventTimeWindow::sliding(5, 4);
 
         let fold = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         let mut received = Vec::new();
         for i in 1..40 {

@@ -5,6 +5,8 @@ use std::collections::VecDeque;
 // pub use aggregator::*;
 // pub use description::*;
 
+use nanorand::{Rng, WyRand};
+
 use crate::operator::{Data, StreamElement, Timestamp};
 
 use super::super::*;
@@ -141,13 +143,90 @@ impl<T: Data> WindowDescription<T> for CountWindow {
     type Manager<A: WindowAccumulator<In = T>> = CountWindowManager<A>;
 
     #[inline]
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
         CountWindowManager {
             init: accumulator,
             size: self.size,
             slide: self.slide,
             exact: self.exact,
             ws: Default::default(),
+        }
+    }
+}
+
+impl StreamingWindowDescription for CountWindow {
+    type Tagger = CountWindowTagger;
+
+    fn build_tagger(&self) -> Self::Tagger {
+        CountWindowTagger {
+            size: self.size,
+            slide: self.slide,
+            exact: self.exact,
+            rng: WyRand::new(),
+            ws: Default::default(),
+        }
+    }
+}
+
+pub struct CountWindowTagger {
+    // init: A,
+    size: usize,
+    slide: usize,
+    exact: bool,
+    rng: WyRand,
+    ws: VecDeque<Slot<WindowTag>>,
+}
+
+impl Clone for CountWindowTagger {
+    fn clone(&self) -> Self {
+        Self {
+            size: self.size.clone(),
+            slide: self.slide.clone(),
+            exact: self.exact.clone(),
+            rng: WyRand::new(),
+            ws: Default::default(),
+        }
+    }
+}
+
+impl WindowTagger for CountWindowTagger {
+    fn map<T: Data>(&mut self, el: StreamElement<T>) -> Vec<WindowElement<WindowTag, T>> {
+        let ts = el.timestamp().cloned();
+        match el {
+            StreamElement::Item(item) | StreamElement::Timestamped(item, _) => {
+                while self.ws.len() < self.size.div_ceil(self.slide) {
+                    self.ws.push_back(Slot::new(self.rng.generate()))
+                }
+                let k = self.ws.front().unwrap().count / self.slide + 1; // TODO: Check
+
+                let mut ret: Vec<_> = (0..k)
+                    .map(|i| {
+                        self.ws[i].count += 1;
+                        WindowElement::new_item(self.ws[i].acc, item.clone())
+                    })
+                    .collect();
+
+                if self.ws[0].count == self.size {
+                    let r = self.ws.pop_front().unwrap();
+                    ret.push(WindowElement::new_close(r.acc));
+                }
+                ret
+            }
+            StreamElement::FlushAndRestart | StreamElement::Terminate => {
+                let ret = if self.exact {
+                    vec![]
+                } else {
+                    self.ws
+                        .pop_front()
+                        .filter(|r| r.count > 0)
+                        .map(|r| WindowElement::new_close(r.acc))
+                        .into_iter()
+                        .collect()
+                };
+                self.ws.drain(..);
+                ret
+            }
+            _ => vec![],
         }
     }
 }
@@ -179,7 +258,7 @@ mod tests {
         let window = CountWindow::sliding(3, 2);
 
         let fold: Fold<isize, Vec<isize>, _> = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         for i in 1..100 {
             let expected = if i >= size && (i - size) % slide == 0 {
@@ -198,7 +277,7 @@ mod tests {
         let window = CountWindow::new(4, 1, true);
 
         let fold: Fold<isize, Vec<isize>, _> = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         let mut res = Vec::new();
         for i in 1..6 {
@@ -219,7 +298,7 @@ mod tests {
         let window = CountWindow::new(4, 1, false);
 
         let fold: Fold<isize, Vec<isize>, _> = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         let mut res = Vec::new();
         for i in 1..6 {
@@ -247,7 +326,7 @@ mod tests {
         let window = CountWindow::sliding(3, 2);
 
         let fold: Fold<isize, Vec<isize>, _> = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         for i in 1..100 {
             let expected = if i >= size && (i - size) % slide == 0 {

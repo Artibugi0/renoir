@@ -110,7 +110,7 @@ impl<T: Data> WindowDescription<T> for LastKWindow {
     type Manager<A: WindowAccumulator<In = T>> = LastKWindowManager<A>;
 
     #[inline]
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
         LastKWindowManager {
             init: accumulator,
             idx: 0,
@@ -130,7 +130,7 @@ mod tests {
         let window = LastKWindow::new(3);
 
         let fold: Fold<isize, Vec<isize>, _> = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         let mut res = Vec::new();
         for i in 0..=5 {

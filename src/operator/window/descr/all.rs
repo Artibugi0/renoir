@@ -48,6 +48,30 @@ where
     }
 }
 
+// impl<A: WindowProcessor> WindowTagger for AllWindowManager<A> {
+//     type In = A::In;
+
+//     type Out = A::Out;
+
+//     fn map(&mut self, el: StreamElement<Self::In>) -> Vec<Self::Out> {
+//         match el {
+//             StreamElement::Item(item) | StreamElement::Timestamped(item, _) => {
+//                 let r = self
+//                     .accumulator
+//                     .get_or_insert_with(|| self.init.clone())
+//                     .process(&item);
+//                 vec![r]
+//             }
+//             StreamElement::FlushAndRestart => vec![],
+//             StreamElement::Terminate => {
+//                 self.accumulator.take();
+//                 vec![]
+//             }
+//             _ => vec![],
+//         }
+//     }
+// }
+
 /// Window of fixed count of elements
 #[derive(Clone, Default)]
 pub struct AllWindow;
@@ -64,7 +88,7 @@ impl<T: Data> WindowDescription<T> for AllWindow {
     type Manager<A: WindowAccumulator<In = T>> = AllWindowManager<A>;
 
     #[inline]
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
         AllWindowManager {
             init: accumulator,
             accumulator: None,
@@ -72,6 +96,14 @@ impl<T: Data> WindowDescription<T> for AllWindow {
         }
     }
 }
+
+// impl StreamingWindowDescription for AllWindow {
+//     type Tagger;
+
+//     fn build_tagger(&self) -> Self::Tagger {
+//         todo!()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -98,7 +130,7 @@ mod tests {
         let window = AllWindow::new();
 
         let fold: Fold<isize, Vec<isize>, _> = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         for i in 1..100 {
             check_return!(manager.process(StreamElement::Item(i)), None);

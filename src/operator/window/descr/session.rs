@@ -82,7 +82,7 @@ impl<T: Data> WindowDescription<T> for SessionWindow {
     type Manager<A: WindowAccumulator<In = T>> = SessionWindowManager<A>;
 
     #[inline]
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
         SessionWindowManager {
             init: accumulator,
             gap: self.gap,
@@ -110,7 +110,7 @@ mod tests {
         let window = SessionWindow::new(Duration::from_millis(10));
 
         let fold = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         let mut received = Vec::new();
         for i in 0..100i64 {

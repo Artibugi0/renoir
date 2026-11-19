@@ -9,6 +9,7 @@ pub use descr::*;
 // pub use description::*;
 
 use crate::block::{GroupHasherBuilder, OperatorStructure, Replication};
+use crate::operator::streaming_window::streamingwindow::{Depth, WindowElement, WindowTag};
 use crate::operator::{Data, DataKey, ExchangeData, Operator, StreamElement, Timestamp};
 use crate::stream::{KeyedStream, Stream, WindowedStream};
 
@@ -23,9 +24,15 @@ mod descr;
 pub trait WindowDescription<T> {
     /// WindowManager corresponding to the WindowDescription
     type Manager<A: WindowAccumulator<In = T>>: WindowManager<In = T, Out = A::Out> + 'static;
+    
     /// Build a window manager that dispatches elements of each window to a clone of the
     /// accumulator passed as parameter
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A>;
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A>;
+}
+
+pub trait StreamingWindowDescription {
+    type Tagger: WindowTagger + 'static;
+    fn build_tagger(&self) -> Self::Tagger;
 }
 
 /// Trait for operations that can be performed on windows. Operations must be incremental
@@ -51,6 +58,13 @@ pub(crate) struct KeyedWindowManager<Key, In, Out, W: WindowManager> {
     _out: PhantomData<Out>,
 }
 
+#[derive(Clone)]
+pub(crate) struct KeyedWindowTagger<K, T, W: WindowTagger> {
+    pub(crate) windows: HashMap<K, W, GroupHasherBuilder>,
+    pub(crate) init: W,
+    _in: PhantomData<T>,
+}
+
 /// Window Managers handle the windowing logic for a single partition (group) of the stream.
 ///
 /// Elements passing on the stream partition will be fed to the manager through the `process`
@@ -71,6 +85,23 @@ pub trait WindowManager: Clone + Send {
     /// Process an input element updating any interest window.
     /// Output the results that have become ready after processing this element.
     fn process(&mut self, el: StreamElement<Self::In>) -> Self::Output;
+    /// Return true if the manager has no active windows and can be dropped
+    fn recycle(&self) -> bool {
+        false
+    }
+}
+
+/// Window Managers handle the windowing logic for a single partition (group) of the stream.
+///
+/// Elements passing on the stream partition will be fed to the manager through the `process`
+/// method, the manager should then instantiate any new window if needed depending on its
+/// logic and on the element passed as input. The input elements should be forwarded to any
+/// relevant active window and the outputs for any window that has been closed after the
+/// input event should be output as return value of the `process` function.
+pub trait WindowTagger: Clone + Send {
+    /// Process an input element updating any interest window.
+    /// Output the results that have become ready after processing this element.
+    fn map<T: Data>(&mut self, el: StreamElement<T>) -> Vec<WindowElement<WindowTag, T>>;
     /// Return true if the manager has no active windows and can be dropped
     fn recycle(&self) -> bool {
         false
@@ -254,6 +285,18 @@ impl<Key, In, Out, W: WindowManager> KeyedWindowManager<Key, In, Out, W> {
         }
     }
 }
+
+impl<Key, In, W: WindowTagger> KeyedWindowTagger<Key, In,W> {
+    pub(crate) fn new(init: W) -> Self {
+        Self {
+            windows: HashMap::default(),
+            init,
+            _in: PhantomData,
+        }
+    }
+}
+
+
 impl<Key, Out, WindowDescr, OperatorChain> WindowedStream<OperatorChain, Out, WindowDescr>
 where
     WindowDescr: WindowDescription<Out>,
@@ -274,7 +317,7 @@ where
         A: WindowAccumulator<In = Out, Out = NewOut>,
     {
         let stream = self.inner;
-        let init = self.descr.build::<A>(accumulator);
+        let init = self.descr.build_manager::<A>(accumulator);
 
         let manager: KeyedWindowManager<Key, Out, NewOut, WindowDescr::Manager<A>> =
             KeyedWindowManager::new(init);

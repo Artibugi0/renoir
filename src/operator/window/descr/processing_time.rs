@@ -113,7 +113,7 @@ impl<T: Data> WindowDescription<T> for ProcessingTimeWindow {
     type Manager<A: WindowAccumulator<In = T>> = ProcessingTimeWindowManager<A>;
 
     #[inline]
-    fn build<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
+    fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A> {
         ProcessingTimeWindowManager {
             init: accumulator,
             size: self.size,
@@ -150,7 +150,7 @@ mod tests {
         let window = ProcessingTimeWindow::tumbling(size);
 
         let fold: Fold<isize, Vec<isize>, _> = Fold::new(Vec::new(), |v, &el| v.push(el));
-        let mut manager = window.build(fold);
+        let mut manager = window.build_manager(fold);
 
         let start = Instant::now();
         let mut received = Vec::new();
