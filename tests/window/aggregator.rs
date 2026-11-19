@@ -2,7 +2,6 @@ use itertools::Itertools;
 
 use renoir::operator::source::{IteratorSource, ParallelIteratorSource};
 use renoir::operator::window::CountWindow;
-use tracing_subscriber::fmt::TestWriter;
 
 use super::utils::TestHelper;
 

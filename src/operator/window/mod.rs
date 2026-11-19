@@ -9,7 +9,7 @@ pub use descr::*;
 // pub use description::*;
 
 use crate::block::{GroupHasherBuilder, OperatorStructure, Replication};
-use crate::operator::streaming_window::streamingwindow::{Depth, WindowElement, WindowTag};
+use crate::operator::streaming_window::streamingwindow::{WindowElement, WindowTag};
 use crate::operator::{Data, DataKey, ExchangeData, Operator, StreamElement, Timestamp};
 use crate::stream::{KeyedStream, Stream, WindowedStream};
 
@@ -24,7 +24,7 @@ mod descr;
 pub trait WindowDescription<T> {
     /// WindowManager corresponding to the WindowDescription
     type Manager<A: WindowAccumulator<In = T>>: WindowManager<In = T, Out = A::Out> + 'static;
-    
+
     /// Build a window manager that dispatches elements of each window to a clone of the
     /// accumulator passed as parameter
     fn build_manager<A: WindowAccumulator<In = T>>(&self, accumulator: A) -> Self::Manager<A>;
@@ -286,7 +286,7 @@ impl<Key, In, Out, W: WindowManager> KeyedWindowManager<Key, In, Out, W> {
     }
 }
 
-impl<Key, In, W: WindowTagger> KeyedWindowTagger<Key, In,W> {
+impl<Key, In, W: WindowTagger> KeyedWindowTagger<Key, In, W> {
     pub(crate) fn new(init: W) -> Self {
         Self {
             windows: HashMap::default(),
@@ -295,7 +295,6 @@ impl<Key, In, W: WindowTagger> KeyedWindowTagger<Key, In,W> {
         }
     }
 }
-
 
 impl<Key, Out, WindowDescr, OperatorChain> WindowedStream<OperatorChain, Out, WindowDescr>
 where

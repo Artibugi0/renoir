@@ -1,8 +1,5 @@
-
-pub(crate) mod streamingwindow;
 mod filter;
-mod unwrap_message;
 mod map;
+pub(crate) mod streamingwindow;
+mod unwrap_message;
 pub mod window_operators;
-
-

@@ -180,9 +180,9 @@ pub struct CountWindowTagger {
 impl Clone for CountWindowTagger {
     fn clone(&self) -> Self {
         Self {
-            size: self.size.clone(),
-            slide: self.slide.clone(),
-            exact: self.exact.clone(),
+            size: self.size,
+            slide: self.slide,
+            exact: self.exact,
             rng: WyRand::new(),
             ws: Default::default(),
         }
@@ -191,7 +191,7 @@ impl Clone for CountWindowTagger {
 
 impl WindowTagger for CountWindowTagger {
     fn map<T: Data>(&mut self, el: StreamElement<T>) -> Vec<WindowElement<WindowTag, T>> {
-        let ts = el.timestamp().cloned();
+        let _ts = el.timestamp().cloned();
         match el {
             StreamElement::Item(item) | StreamElement::Timestamped(item, _) => {
                 while self.ws.len() < self.size.div_ceil(self.slide) {

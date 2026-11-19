@@ -1,6 +1,10 @@
 use std::fmt::Display;
 
-use crate::{ExecutionMetadata, block::{BlockStructure, OperatorStructure}, operator::{Data, Operator, StreamElement, streaming_window::streamingwindow::WindowMsg}};
+use crate::{
+    block::{BlockStructure, OperatorStructure},
+    operator::{streaming_window::streamingwindow::WindowMsg, Data, Operator, StreamElement},
+    ExecutionMetadata,
+};
 
 #[derive(Clone)]
 pub(crate) struct UnwrapMsg<Op, I>
@@ -27,7 +31,12 @@ where
     I: Data,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} -> UnwrapMsg<{}>", self.prev, std::any::type_name::<I>())
+        write!(
+            f,
+            "{} -> UnwrapMsg<{}>",
+            self.prev,
+            std::any::type_name::<I>()
+        )
     }
 }
 

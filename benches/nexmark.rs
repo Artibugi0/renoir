@@ -70,7 +70,7 @@ fn winning_bids(
                             && (a.date_time..a.expires).contains(&b.date_time)
                             && bids.first().map(|w| b.price > w.price).unwrap_or(true)
                         {
-                            bids.truncate(0);
+                            bids.clear();
                             bids.push(b);
                         }
                     } else {

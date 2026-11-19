@@ -299,7 +299,7 @@ fn wc_fast_kstring(env: &StreamContext, path: &Path) {
                     } else if !word.is_empty() {
                         let key = KString::from_ref(word.as_str());
                         *acc.entry(key).or_default() += 1;
-                        word.truncate(0);
+                        word.clear();
                     }
                 }
             },

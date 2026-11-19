@@ -2,30 +2,21 @@ use crate::{
     block::OperatorStructure,
     operator::{
         streaming_window::streamingwindow::{
-            Depth, FirstClassWindowedStream, FirstClassWindowedWithDescr, Level, WindowElement,
+            FirstClassWindowedStream, Level,
             WindowMsg, WindowTag, Zero,
         },
         window::{
-            KeyedWindowTagger, StreamingWindowDescription, WindowAccumulator, WindowDescription,
-            WindowManager, WindowTagger,
+            KeyedWindowTagger, StreamingWindowDescription, WindowDescription,
+            WindowTagger,
         },
         Data, DataKey, Operator, StreamElement,
     },
     WindowedStream,
 };
-use flume::Sender;
-use nanorand::{Rng, WyRand};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::{
     collections::VecDeque,
     fmt::{Debug, Display},
-    marker::PhantomData,
 };
-
-//provvisorio,probabilmente la dimensione del canale sarà pari
-//alle dimensioni fornite alla finestra nel momento della sua costruzione
-const CHANNEL_SIZE: usize = 1024;
 
 // pub struct WindowS<I: Send + 'static, D: Depth> {
 
@@ -87,7 +78,8 @@ where
 {
     pub fn to_streaming_window(
         self,
-    ) -> FirstClassWindowedStream<impl Operator<Out = (Key, WindowTag, WindowMsg<Out>)>, Level<Zero>> {
+    ) -> FirstClassWindowedStream<impl Operator<Out = (Key, WindowTag, WindowMsg<Out>)>, Level<Zero>>
+    {
         let stream = self.inner;
         let tgr = self.descr.build_tagger();
 

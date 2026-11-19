@@ -100,10 +100,15 @@ impl<I> WindowMsg<I> {
 }
 
 impl<K, I> StreamElement<(K, WindowTag, WindowMsg<I>)> {
-    pub fn map_window_msg<O>(self, f: impl FnOnce(I) -> O) -> StreamElement<(K, WindowTag, WindowMsg<O>)> {
+    pub fn map_window_msg<O>(
+        self,
+        f: impl FnOnce(I) -> O,
+    ) -> StreamElement<(K, WindowTag, WindowMsg<O>)> {
         match self {
             StreamElement::Item((k, t, m)) => StreamElement::Item((k, t, m.map(f))),
-            StreamElement::Timestamped((k, t, m), ts) => StreamElement::Timestamped((k, t, m.map(f)), ts),
+            StreamElement::Timestamped((k, t, m), ts) => {
+                StreamElement::Timestamped((k, t, m.map(f)), ts)
+            }
             StreamElement::Watermark(w) => StreamElement::Watermark(w),
             StreamElement::Terminate => StreamElement::Terminate,
             StreamElement::FlushAndRestart => StreamElement::FlushAndRestart,

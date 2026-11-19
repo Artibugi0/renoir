@@ -140,14 +140,15 @@ where
         if !self.accumulators.is_empty() {
             // take a reference to move into the closure, avoiding moving "self"
             // let timestamps = &mut self.timestamps;
-            self.ready
-                .extend(self.accumulators.drain().map(|((key, _tag), (value, timestamp))| {
+            self.ready.extend(self.accumulators.drain().map(
+                |((key, _tag), (value, timestamp))| {
                     if let Some(ts) = timestamp {
                         StreamElement::Timestamped((key, value), ts)
                     } else {
                         StreamElement::Item((key, value))
                     }
-                }));
+                },
+            ));
         }
 
         // consume the ready items

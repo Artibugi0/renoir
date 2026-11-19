@@ -33,7 +33,7 @@ impl<T: Serialize> BincodeCacher<T> {
         bincode::serde::encode_into_std_write(&self.buf, &mut self.file, config::standard())
             .unwrap();
 
-        self.buf.truncate(0);
+        self.buf.clear();
     }
 }
 
