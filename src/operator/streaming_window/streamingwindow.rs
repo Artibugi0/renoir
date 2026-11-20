@@ -1,18 +1,13 @@
-use std::collections::VecDeque;
-use std::fmt::Display;
 use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use crate::block::OperatorStructure;
 use crate::operator::streaming_window::filter::Filter;
 use crate::operator::streaming_window::map::Map;
 use crate::operator::streaming_window::window_operators::fold::Fold;
 // use crate::operator::streaming_window::window_operators::fold::NestedFold;
-use crate::operator::window::{
-    KeyedWindowManager, WindowAccumulator, WindowDescription, WindowManager,
-};
-use crate::operator::{Data, DataKey, StreamElement};
+use crate::operator::window::{WindowDescription};
+use crate::operator::{Data, DataKey};
 use crate::stream::Stream;
 use crate::KeyedStream;
 
@@ -63,6 +58,7 @@ pub trait Depth {
     //valore della profondità
     const N: usize;
 }
+
 pub struct Zero;
 impl Depth for Zero {
     type Path = ();
@@ -74,6 +70,7 @@ impl<D: Depth> Depth for Level<D> {
     type Path = (D::Path, u64);
     const N: usize = D::N + 1;
 }
+
 pub struct FirstClassWindowedStream<Op, D = Level<Zero>>(pub Stream<Op>, PhantomData<D>)
 where
     Op: Operator,
@@ -219,193 +216,6 @@ where
     pub(crate) _win_out: PhantomData<WinOut>,
 }
 
-fn control_msg<T, U>(el: StreamElement<T>) -> Option<StreamElement<U>> {
-    match el {
-        StreamElement::Watermark(w) => Some(StreamElement::Watermark(w)),
-        StreamElement::Terminate => Some(StreamElement::Terminate),
-        StreamElement::FlushAndRestart => Some(StreamElement::FlushAndRestart),
-        StreamElement::FlushBatch => Some(StreamElement::FlushBatch),
-        StreamElement::Item(_) | StreamElement::Timestamped(_, _) => None,
-    }
-}
-#[derive(Clone)]
-pub struct FirstClassWindowOperator<Key, In, Out, Prev, W>
-where
-    W: WindowManager,
-{
-    /// The previous operators in the chain.
-    prev: Prev,
-    /// The name of the actual operator that this one abstracts.
-    ///
-    /// It is used only for tracing purposes.
-    name: String,
-    /// The manager that will build the windows.
-    manager: KeyedWindowManager<Key, In, Out, W>,
-    /// A buffer for storing ready items.
-    output_buffer: VecDeque<StreamElement<(Key, Out)>>,
-}
-
-impl<Op, WinOut, WinDescr, Key, In, D> FirstClassWindowedWithDescr<Op, WinOut, WinDescr, Level<D>>
-where
-    WinDescr: WindowDescription<In>,
-    Op: Operator<Out = (Key, WindowMsg<In>)> + 'static,
-    Key: DataKey,
-    In: Data,
-    D: Depth,
-{
-    pub(crate) fn add_window_operator<A, NewOut>(
-        self,
-        name: &str,
-        accumulator: A,
-    ) -> KeyedStream<impl Operator<Out = (Key, NewOut)>>
-    where
-        NewOut: Data,
-        A: WindowAccumulator<In = In, Out = NewOut>,
-    {
-        let init = self.descr.build_manager::<A>(accumulator);
-        let manager = KeyedWindowManager::new(init);
-
-        KeyedStream(
-            self.inner
-                .0
-                .add_operator(|prev| FirstClassWindowOperator::new(prev, name.into(), manager)),
-        )
-    }
-}
-
-impl<Key, In, Out, Prev, W> Display for FirstClassWindowOperator<Key, In, Out, Prev, W>
-where
-    W: WindowManager,
-    Prev: Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} -> {} -> WindowOperator[{}]<{}>",
-            self.prev,
-            std::any::type_name::<W>(),
-            self.name,
-            std::any::type_name::<Out>(),
-        )
-    }
-}
-impl<Key, In, Out, Prev, W> FirstClassWindowOperator<Key, In, Out, Prev, W>
-where
-    W: WindowManager<In = In, Out = Out> + Send,
-    Key: DataKey,
-    In: Data,
-    Out: Data,
-{
-    fn process_item(&mut self, key: Key, el: StreamElement<In>) {
-        let mgr = self
-            .manager
-            .windows
-            .entry(key.clone())
-            .or_insert_with(|| self.manager.init.clone());
-
-        let ret = mgr.process(el);
-        self.output_buffer.extend(
-            ret.into_iter()
-                .map(|e| StreamElement::from(e).add_key(key.clone())),
-        );
-    }
-}
-
-impl<Key, In, Out, Prev, W> Operator for FirstClassWindowOperator<Key, In, Out, Prev, W>
-where
-    W: WindowManager<In = In, Out = Out> + Send,
-    Prev: Operator<Out = (Key, WindowMsg<In>)>,
-    Key: DataKey,
-    In: Data,
-    Out: Data,
-{
-    type Out = (Key, Out);
-
-    fn setup(&mut self, metadata: &mut crate::ExecutionMetadata) {
-        self.prev.setup(metadata);
-    }
-
-    fn next(&mut self) -> StreamElement<(Key, Out)> {
-        loop {
-            if let Some(item) = self.output_buffer.pop_front() {
-                return item;
-            }
-
-            let el = self.prev.next();
-            match el {
-                StreamElement::Item((id, WindowMsg::Item(item))) => {
-                    self.process_item(id, StreamElement::Item(item));
-                }
-                StreamElement::Timestamped((id, WindowMsg::Item(item)), ts) => {
-                    self.process_item(id, StreamElement::Timestamped(item, ts));
-                }
-                StreamElement::Item((id, WindowMsg::WindowClosed))
-                | StreamElement::Timestamped((id, WindowMsg::WindowClosed), _) => {
-                    let mgr = self
-                        .manager
-                        .windows
-                        .entry(id.clone())
-                        .or_insert_with(|| self.manager.init.clone());
-                    let ret = mgr.process(StreamElement::FlushAndRestart);
-                    self.output_buffer.extend(
-                        ret.into_iter()
-                            .map(|e| StreamElement::from(e).add_key(id.clone())),
-                    );
-                    // la finestra esterna è chiusa: libero lo stato di questa chiave
-                    self.manager.windows.remove(&id);
-                }
-                StreamElement::FlushBatch => return StreamElement::FlushBatch,
-
-                el => {
-                    let Some(el) = control_msg::<_, In>(el) else {
-                        continue;
-                    };
-                    self.manager.windows.retain(|key, mgr| {
-                        let ret = mgr.process(el.clone());
-                        self.output_buffer.extend(
-                            ret.into_iter()
-                                .map(|e| StreamElement::from(e).add_key(key.clone())),
-                        );
-                        !mgr.recycle()
-                    });
-                    // Forward system messages and watermarks
-                    let msg = match el {
-                        StreamElement::Watermark(w) => StreamElement::Watermark(w),
-                        StreamElement::Terminate => StreamElement::Terminate,
-                        StreamElement::FlushAndRestart => StreamElement::FlushAndRestart,
-                        _ => unreachable!(),
-                    };
-                    self.output_buffer.push_back(msg);
-                }
-            }
-        }
-    }
-
-    fn structure(&self) -> crate::block::BlockStructure {
-        self.prev
-            .structure()
-            .add_operator(OperatorStructure::new::<(Key, Out), _>(&self.name))
-    }
-}
-
-impl<Key, In, Out, Prev, W> FirstClassWindowOperator<Key, In, Out, Prev, W>
-where
-    W: WindowManager,
-{
-    pub(crate) fn new(
-        prev: Prev,
-        name: String,
-        manager: KeyedWindowManager<Key, In, Out, W>,
-    ) -> Self {
-        Self {
-            prev,
-            name,
-            manager,
-            output_buffer: Default::default(),
-        }
-    }
-}
-
 impl<Op, D, I> FirstClassWindowedStream<Op, Level<D>>
 where
     D: Depth,
@@ -423,3 +233,4 @@ where
         }
     }
 }
+
