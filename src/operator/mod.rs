@@ -183,6 +183,14 @@ pub trait Operator: Clone + Send + Display {
 }
 
 impl<Out> StreamElement<Out> {
+    pub fn item(&self) -> Option<&Out> {
+        if let StreamElement::Item(item) | StreamElement::Timestamped(item, _) = self {
+            Some(item)
+        } else {
+            None
+        }
+    }
+
     /// Create a new `StreamElement` with an `Item(())` if `self` contains an item, otherwise it
     /// returns the same variant of `self`.
     pub fn variant(&self) -> StreamElement<()> {
@@ -1160,6 +1168,7 @@ where
     where
         It: IntoIterator,
         It::IntoIter: Send,
+        <It as IntoIterator>::Item: Send,
         It::Item: Send,
         F: Fn(Op::Out) -> It + Send + Clone,
     {

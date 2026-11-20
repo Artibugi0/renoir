@@ -9,7 +9,7 @@ pub use descr::*;
 // pub use description::*;
 
 use crate::block::{GroupHasherBuilder, OperatorStructure, Replication};
-use crate::operator::streaming_window::streamingwindow::{WindowElement, WindowTag};
+use crate::operator::streaming_window::streamingwindow::{ChainTag, InnerWindowItem, NoTag, TagId, WindowItem, WindowTag};
 use crate::operator::{Data, DataKey, ExchangeData, Operator, StreamElement, Timestamp};
 use crate::stream::{KeyedStream, Stream, WindowedStream};
 
@@ -59,10 +59,10 @@ pub(crate) struct KeyedWindowManager<Key, In, Out, W: WindowManager> {
 }
 
 #[derive(Clone)]
-pub(crate) struct KeyedWindowTagger<K, T, W: WindowTagger> {
-    pub(crate) windows: HashMap<K, W, GroupHasherBuilder>,
+pub(crate) struct KeyedWindowTagger<K, T, I, W: WindowTagger> {
+    pub(crate) windows: HashMap<(K, T), W, GroupHasherBuilder>,
     pub(crate) init: W,
-    _in: PhantomData<T>,
+    _in: PhantomData<I>,
 }
 
 /// Window Managers handle the windowing logic for a single partition (group) of the stream.
@@ -99,9 +99,8 @@ pub trait WindowManager: Clone + Send {
 /// relevant active window and the outputs for any window that has been closed after the
 /// input event should be output as return value of the `process` function.
 pub trait WindowTagger: Clone + Send {
-    /// Process an input element updating any interest window.
-    /// Output the results that have become ready after processing this element.
-    fn map<T: Data>(&mut self, el: StreamElement<T>) -> Vec<WindowElement<WindowTag, T>>;
+    fn tag<I: Data>(&mut self, el: StreamElement<InnerWindowItem<(), I>>) -> Vec<InnerWindowItem<TagId, I>>;
+
     /// Return true if the manager has no active windows and can be dropped
     fn recycle(&self) -> bool {
         false
@@ -286,7 +285,7 @@ impl<Key, In, Out, W: WindowManager> KeyedWindowManager<Key, In, Out, W> {
     }
 }
 
-impl<Key, In, W: WindowTagger> KeyedWindowTagger<Key, In, W> {
+impl<K, T, I, W: WindowTagger> KeyedWindowTagger<K, T, I, W> {
     pub(crate) fn new(init: W) -> Self {
         Self {
             windows: HashMap::default(),

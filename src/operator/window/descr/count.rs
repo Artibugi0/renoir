@@ -174,7 +174,7 @@ pub struct CountWindowTagger {
     slide: usize,
     exact: bool,
     rng: WyRand,
-    ws: VecDeque<Slot<WindowTag>>,
+    ws: VecDeque<Slot<TagId>>,
 }
 
 impl Clone for CountWindowTagger {
@@ -190,10 +190,13 @@ impl Clone for CountWindowTagger {
 }
 
 impl WindowTagger for CountWindowTagger {
-    fn map<T: Data>(&mut self, el: StreamElement<T>) -> Vec<WindowElement<WindowTag, T>> {
-        let _ts = el.timestamp().cloned();
+    fn tag<T: Data>(
+        &mut self,
+        el: StreamElement<InnerWindowItem<(), T>>,
+    ) -> Vec<InnerWindowItem<TagId, T>> {
         match el {
-            StreamElement::Item(item) | StreamElement::Timestamped(item, _) => {
+            StreamElement::Item(InnerWindowItem::Item { item, .. })
+            | StreamElement::Timestamped(InnerWindowItem::Item { item, .. }, _) => {
                 while self.ws.len() < self.size.div_ceil(self.slide) {
                     self.ws.push_back(Slot::new(self.rng.generate()))
                 }
@@ -202,24 +205,27 @@ impl WindowTagger for CountWindowTagger {
                 let mut ret: Vec<_> = (0..k)
                     .map(|i| {
                         self.ws[i].count += 1;
-                        WindowElement::new_item(self.ws[i].acc, item.clone())
+                        InnerWindowItem::new_item(self.ws[i].acc, item.clone())
                     })
                     .collect();
 
                 if self.ws[0].count == self.size {
                     let r = self.ws.pop_front().unwrap();
-                    ret.push(WindowElement::new_close(r.acc));
+                    ret.push(InnerWindowItem::new_close(r.acc));
                 }
                 ret
             }
-            StreamElement::FlushAndRestart | StreamElement::Terminate => {
+            StreamElement::Item(InnerWindowItem::Close { .. })
+            | StreamElement::Timestamped(InnerWindowItem::Close { .. }, _)
+            | StreamElement::FlushAndRestart
+            | StreamElement::Terminate => {
                 let ret = if self.exact {
                     vec![]
                 } else {
                     self.ws
                         .pop_front()
                         .filter(|r| r.count > 0)
-                        .map(|r| WindowElement::new_close(r.acc))
+                        .map(|r| InnerWindowItem::new_close(r.acc))
                         .into_iter()
                         .collect()
                 };

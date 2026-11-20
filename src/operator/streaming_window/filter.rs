@@ -2,16 +2,16 @@ use std::fmt::Display;
 use std::marker::PhantomData;
 
 use crate::block::{BlockStructure, OperatorStructure};
-use crate::operator::streaming_window::streamingwindow::{KWElement, WindowMsg};
+use crate::operator::streaming_window::streamingwindow::WindowItem;
 use crate::operator::{Operator, StreamElement};
 use crate::scheduler::ExecutionMetadata;
 
 //variante di filter per StreamingWindow, adattata per ricevere gli elementi della enum WindowMsg
 //cambiano i generici utilizzati,manca qualcosa/va modificato?
 #[derive(Clone)]
-pub struct Filter<Op, F, K, I>
+pub struct Filter<Op, F, K, T, I>
 where
-    Op: Operator<Out = KWElement<K, I>> + 'static,
+    Op: Operator<Out = WindowItem<K, T, I>> + 'static,
     F: Fn(&I) -> bool + Clone + Send + 'static,
 {
     prev: Op,
@@ -19,9 +19,9 @@ where
     marker: PhantomData<(K, I)>,
 }
 
-impl<Op, F, K, I> Display for Filter<Op, F, K, I>
+impl<Op, F, K, T, I> Display for Filter<Op, F, K, T, I>
 where
-    Op: Operator<Out = KWElement<K, I>> + 'static,
+    Op: Operator<Out = WindowItem<K, T, I>> + 'static,
     F: Fn(&I) -> bool + Clone + Send + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -34,10 +34,10 @@ where
     }
 }
 
-impl<Op, F, K, I> Filter<Op, F, K, I>
+impl<Op, F, K, T, I> Filter<Op, F, K, T, I>
 where
     I: Send,
-    Op: Operator<Out = KWElement<K, I>> + 'static,
+    Op: Operator<Out = WindowItem<K, T, I>> + 'static,
     F: Fn(&I) -> bool + Clone + Send + 'static,
 {
     pub(super) fn new(prev: Op, predicate: F) -> Self {
@@ -49,11 +49,12 @@ where
     }
 }
 
-impl<Op, F, K, I> Operator for Filter<Op, F, K, I>
+impl<Op, F, K, T, I> Operator for Filter<Op, F, K, T, I>
 where
-    I: Send + Clone,
     K: Send + Clone,
-    Op: Operator<Out = KWElement<K, I>> + 'static,
+    T: Send + Clone,
+    I: Send + Clone,
+    Op: Operator<Out = WindowItem<K, T, I>> + 'static,
     F: Fn(&I) -> bool + Clone + Send + 'static,
 {
     type Out = Op::Out;
@@ -66,8 +67,8 @@ where
     fn next(&mut self) -> StreamElement<Op::Out> {
         loop {
             match self.prev.next() {
-                StreamElement::Item((_, _, WindowMsg::Item(ref item)))
-                | StreamElement::Timestamped((_, _, WindowMsg::Item(ref item)), _)
+                StreamElement::Item(WindowItem::Item { ref item, .. })
+                | StreamElement::Timestamped(WindowItem::Item { ref item, .. }, _)
                     if !(self.predicate)(item) => {} // scarta
                 element => return element,
             }

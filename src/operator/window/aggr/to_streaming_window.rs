@@ -1,35 +1,42 @@
 use crate::{
-    WindowedStream, operator::{
-        Data, DataKey, Operator, streaming_window::{router::WindowRouter, streamingwindow::{
-            FirstClassWindowedStream, Level, WindowMsg, WindowTag, Zero,
-        }}, window::{KeyedWindowTagger, StreamingWindowDescription, WindowDescription},
+    operator::{
+        streaming_window::{
+            router::WindowRouter,
+            streamingwindow::{
+                ChainTag, FirstClassWindowedStream, FirstClassWindowedWithDescr, NoTag, WindowItem,
+                WindowTag,
+            },
+        },
+        window::{KeyedWindowTagger, StreamingWindowDescription, WindowDescription},
+        Data, DataKey, Operator,
     },
+    WindowedStream,
 };
 use std::fmt::Debug;
 
 //versione per entrare nel contesto di StreamingWindow
-impl<Key, Out, W, Op> WindowedStream<Op, Out, W>
+impl<K, I, W, Op> WindowedStream<Op, I, W>
 where
-    W: StreamingWindowDescription + WindowDescription<Out> + 'static,
-    Op: Operator<Out = (Key, Out)> + 'static,
-    Key: DataKey,
-    Out: Data + Debug,
+    W: StreamingWindowDescription + WindowDescription<I> + 'static,
+    Op: Operator<Out = (K, I)> + 'static,
+    K: DataKey,
+    I: Data + Debug,
 {
     pub fn to_streaming_window(
         self,
-    ) -> FirstClassWindowedStream<impl Operator<Out = (Key, WindowTag, WindowMsg<Out>)>, Level<Zero>>
-    {
+    ) -> FirstClassWindowedStream<impl Operator<Out = WindowItem<K, ChainTag<NoTag>, I>>> {
         let stream = self.inner;
         let tgr = self.descr.build_tagger();
 
-        let manager = KeyedWindowTagger::<_, _, _>::new(tgr);
+        let manager = KeyedWindowTagger::new(tgr);
+        let name = std::any::type_name::<W>();
 
         // stream
         //     .add_operator(|prev| WindowOperator::new(prev, name.into(), manager))
 
         let new_s = stream
             .0
-            .add_operator(|prev| WindowRouter::new(prev, std::any::type_name::<W>(), manager));
+            .add_operator(|prev| WindowRouter::new(prev, name, manager));
 
         //Crea canale per poter inviare gli elementi al nuovo blocco
 
@@ -37,32 +44,31 @@ where
     }
 }
 
-// //Versione per aumentare la profondità di un livello
-// //ha ancora bisogno di essere completata
+//Versione per aumentare la profondità di un livello
+//ha ancora bisogno di essere completata
 
-// impl<Op, WinOut, WinDescr, D,I> FirstClassWindowedWithDescr<Op,WinOut, WinDescr,Level<D>>
-// where
-//     WinDescr: WindowDescription<I> + 'static,
-//     D:Depth + Debug,
-//     Op: Operator<Out = (<Level<D> as Depth>::Path, WindowMsg<I>)> + 'static,
-//     WinOut: 'static,
-//     I: Data + Debug,
-// {
-//     pub fn to_streaming_window(self) -> FirstClassWindowedStream<impl Operator<Out = (<Level<D> as Depth>::Path, WindowMsg<I>)>, Level<Level<D>>> {
-//         //Crea canale per poter inviare gli elementi al nuovo blocco
-//         let (tx, source) =
-//             ChannelSource::<((<Level<D> as Depth>::Path,u64), WindowMsg<I>)>::new(CHANNEL_SIZE, Replication::One);
-//         let ctx = self.inner.0.ctx.clone();
+impl<K, T, I, W, Op> FirstClassWindowedWithDescr<Op, T, W>
+where
+    W: StreamingWindowDescription,
+    Op: Operator<Out = WindowItem<K, T, I>>,
+    K: DataKey,
+    T: WindowTag,
+    I: Data,
+{
+    pub fn to_streaming_window(
+        self,
+    ) -> FirstClassWindowedStream<impl Operator<Out = WindowItem<K, ChainTag<T>, I>>, ChainTag<T>> {
+        let stream = self.inner;
+        let tgr = self.descr.build_tagger();
 
-//         //Chiudi blocco corrente con for_each che scarta l'output vuoto del nostro operatore (Key,())
-//         self.add_window_operator("to_streaming_window", WindowS::new(tx,<Level<D> as Depth>::Path))
-//             .for_each(|_| {});
+        let manager = KeyedWindowTagger::new(tgr);
+        let name = std::any::type_name::<W>();
 
-//         let block = ctx
-//             .lock()
-//             .new_block(source, Default::default(), Default::default());
-//         let downstream = Stream::new(ctx, block);
+        // stream
+        //     .add_operator(|prev| WindowOperator::new(prev, name.into(), manager))
 
-//         FirstClassWindowedStream::new(downstream)
-//     }
-// }
+        stream.add_operator(|prev| {
+            WindowRouter::<K, T, ChainTag<T>, I, Op, W::Tagger>::new(prev, name, manager)
+        })
+    }
+}
