@@ -184,110 +184,195 @@ fn test_map_window() {
 }
 
 #[test]
-fn test_distinct_count_tumbling(){
-    TestHelper::local_remote_env(|env|{
-        let s = [0,1,1,2,3,4,5,6,7,8,9,9,9]; //count should be 10
+fn test_distinct_count_tumbling() {
+    TestHelper::local_remote_env(|env| {
+        let s = [0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9]; //count should be 10
         let source = IteratorSource::new(s.into_iter());
         let res = env
-        .stream(source)
-        .window_all(CountWindow::tumbling(13))
-        .count_distinct()
-        .drop_key()    
-        .collect_vec();
+            .stream(source)
+            .window_all(CountWindow::tumbling(13))
+            .count_distinct()
+            .drop_key()
+            .collect_vec();
         env.execute_blocking();
         if let Some(res) = res.get() {
-            assert_eq!(
-                res,vec![10]
-            );
+            assert_eq!(res, vec![10]);
         }
     });
-} 
+}
 #[test]
-fn test_distinct_count_sliding(){
-        TestHelper::local_remote_env(|env|{
-        let s = [0,1,1,2,3,4,5,6,7,8,9,9,9,0,10];
+fn test_distinct_count_sliding() {
+    TestHelper::local_remote_env(|env| {
+        let s = [0, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 0, 10];
         let source = IteratorSource::new(s.into_iter());
         let res = env
-        .stream(source)
-        .window_all(CountWindow::sliding(3,1))
-        .count_distinct()
-        .drop_key()    
-        .collect_vec();
+            .stream(source)
+            .window_all(CountWindow::sliding(3, 1))
+            .count_distinct()
+            .drop_key()
+            .collect_vec();
         env.execute_blocking();
         if let Some(res) = res.get() {
-            assert_eq!(
-                res,vec![2,2,3,3,3,3,3,3,3,2,1,2,3]
-            );
+            assert_eq!(res, vec![2, 2, 3, 3, 3, 3, 3, 3, 3, 2, 1, 2, 3]);
         }
     });
 }
 
 #[test]
- fn test_sum_if(){
-    TestHelper::local_remote_env(|env|{
-        let s = [0,1,2,3,4,5,6,7,8,9];
+fn test_sum_if() {
+    TestHelper::local_remote_env(|env| {
+        let s = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let source = IteratorSource::new(s.into_iter());
         let res = env
-        .stream(source)
-        .window_all(CountWindow::tumbling(10))
-        .sum_if::<_,i32>(|x| *x > 5 )
-        .drop_key()
-        .collect_vec();
-    env.execute_blocking();
-    if let Some(res) = res.get(){
-        assert_eq!(
-            res,vec![30]
-        )
-    } 
+            .stream(source)
+            .window_all(CountWindow::tumbling(10))
+            .sum_if::<_, i32>(|x| *x > 5)
+            .drop_key()
+            .collect_vec();
+        env.execute_blocking();
+        if let Some(res) = res.get() {
+            assert_eq!(res, vec![30])
+        }
     });
 }
 
 #[test]
 fn streaming_window_test() {
     TestHelper::local_remote_env(|env| {
-        let s = [0,1,2,3,4,5,6,7,8,9];
-        let source = IteratorSource::new(s.into_iter());
-        let res = env
-            .stream(source)
-            .window_all(CountWindow::tumbling(5))
-            .to_streaming_window()         
-            .filter(|n| n % 2 == 0)
-            .fold(0, |acc, x| *acc += x)
-            .drop_key()
-            .collect_vec();      
-
-
-        env.execute_blocking();
-
-        if let Some(mut res) = res.get() {
-            res.sort();
-            assert_eq!(res, vec![6,14]);
-        }
-    });
-}
-#[test]
-fn streaming_window_map_test(){
-    TestHelper::local_remote_env(|env|{
-        let s = [1,2,3,4,5,6,7,8,9,10];
+        let s = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let source = IteratorSource::new(s.into_iter());
         let res = env
             .stream(source)
             .window_all(CountWindow::tumbling(5))
             .to_streaming_window()
-            .map(|x| x*2)
+            .filter(|n| n % 2 == 0)
             .fold(0, |acc, x| *acc += x)
             .drop_key()
             .collect_vec();
-                env.execute_blocking();
+
+        env.execute_blocking();
 
         if let Some(mut res) = res.get() {
             res.sort();
-            assert_eq!(res, vec![30,80]);
+            assert_eq!(res, vec![6, 14]);
         }
-    }
-    );
+    });
 }
-/* 
+#[test]
+fn streaming_window_map_test() {
+    TestHelper::local_remote_env(|env| {
+        let s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()
+            .map(|x| x * 2)
+            .fold(0, |acc, x| *acc += x)
+            .drop_key()
+            .collect_vec();
+        env.execute_blocking();
+
+        if let Some(mut res) = res.get() {
+            res.sort();
+            assert_eq!(res, vec![30, 80]);
+        }
+    });
+}
+#[test]
+fn streaming_window_flatten_test() {
+    TestHelper::local_remote_env(|env| {
+        let s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()
+            .map(|x| vec![x, x * 10])
+            .flatten()
+            .fold(0, |acc, x| *acc += x)
+            .drop_key()
+            .collect_vec();
+        env.execute_blocking();
+
+        if let Some(mut res) = res.get() {
+            res.sort();
+            // finestra 1: 11 * (1+..+5) = 165, finestra 2: 11 * (6+..+10) = 440
+            assert_eq!(res, vec![165, 440]);
+        }
+    });
+}
+
+#[test]
+fn streaming_window_flatten_count_test() {
+    TestHelper::local_remote_env(|env| {
+        let s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()
+            .map(|x| vec![x, x])
+            .flatten()
+            .fold(0, |acc, _| *acc += 1)
+            .drop_key()
+            .collect_vec();
+        env.execute_blocking();
+
+        if let Some(res) = res.get() {
+            // ogni finestra ha 5 elementi, ciascuno srotolato in 2:
+            // verifica anche che WindowClosed arrivi dopo tutti gli item
+            assert_eq!(res, vec![10, 10]);
+        }
+    });
+}
+
+#[test]
+fn streaming_window_flat_map_test() {
+    TestHelper::local_remote_env(|env| {
+        let s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()
+            .flat_map(|x| vec![x, x + 100])
+            .fold(0, |acc, x| *acc += x)
+            .drop_key()
+            .collect_vec();
+        env.execute_blocking();
+
+        if let Some(mut res) = res.get() {
+            res.sort();
+            // finestra 1: 15 + (15 + 500) = 530, finestra 2: 40 + (40 + 500) = 580
+            assert_eq!(res, vec![530, 580]);
+        }
+    });
+}
+
+#[test]
+fn streaming_window_flat_map_empty_test() {
+    TestHelper::local_remote_env(|env| {
+        let s = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let source = IteratorSource::new(s.into_iter());
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(5))
+            .to_streaming_window()
+            .flat_map(|x| if x % 2 == 0 { vec![x] } else { vec![] })
+            .fold(0, |acc, x| *acc += x)
+            .drop_key()
+            .collect_vec();
+        env.execute_blocking();
+
+        if let Some(mut res) = res.get() {
+            res.sort();
+            // finestra 1: 2+4 = 6, finestra 2: 6+8+10 = 24
+            assert_eq!(res, vec![6, 24]);
+        }
+    });
+}
+/*
 #[test]
 fn streaming_window_test_multiple() {
     TestHelper::local_remote_env(|env| {
@@ -299,10 +384,10 @@ fn streaming_window_test_multiple() {
             .to_streaming_window()
             .filter(|n| n % 2 == 0)
             .window(CountWindow::tumbling(2))
-            .to_streaming_window()         
+            .to_streaming_window()
             .fold(0, |acc, x| *acc += x)
             .drop_key()
-            .collect_vec();     
+            .collect_vec();
 
 
         env.execute_blocking();

@@ -9,17 +9,17 @@ use crate::scheduler::ExecutionMetadata;
 //variante di filter per StreamingWindow, adattata per ricevere gli elementi della enum WindowMsg
 //cambiano i generici utilizzati,manca qualcosa/va modificato?
 #[derive(Clone)]
-pub struct Filter<Op, Predicate,K,I>
+pub struct Filter<Op, Predicate, K, I>
 where
     Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
 {
     prev: Op,
     predicate: Predicate,
-    marker: PhantomData<(K,I)>
+    marker: PhantomData<(K, I)>,
 }
 
-impl<Op, Predicate,K,I> Display for Filter<Op,Predicate,K,I>
+impl<Op, Predicate, K, I> Display for Filter<Op, Predicate, K, I>
 where
     Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
@@ -34,25 +34,27 @@ where
     }
 }
 
-impl<Op,Predicate,K,I> Filter<Op,Predicate,K,I>
+impl<Op, Predicate, K, I> Filter<Op, Predicate, K, I>
 where
     I: Send,
     Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
 {
     pub(super) fn new(prev: Op, predicate: Predicate) -> Self {
-        Self { prev, predicate, marker: PhantomData }
+        Self {
+            prev,
+            predicate,
+            marker: PhantomData,
+        }
     }
 }
 
-
-impl<Op, Predicate,K,I> Operator for Filter<Op,Predicate,K,I>
+impl<Op, Predicate, K, I> Operator for Filter<Op, Predicate, K, I>
 where
     I: Send + Clone,
-    K:Send + Clone,
+    K: Send + Clone,
     Op: Operator<Out = (K, WindowMsg<I>)>,
     Predicate: Fn(&I) -> bool + Clone + Send + 'static,
-    
 {
     type Out = Op::Out;
 
@@ -75,6 +77,8 @@ where
     fn structure(&self) -> BlockStructure {
         self.prev
             .structure()
-            .add_operator(OperatorStructure::new::<Op::Out, _>("Streaming_Window_Filter"))
+            .add_operator(OperatorStructure::new::<Op::Out, _>(
+                "StreamingWindow_Filter",
+            ))
     }
 }

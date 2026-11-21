@@ -1,23 +1,21 @@
-use std::collections::{VecDeque};
-use std::fmt::Display;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use crate::operator::streaming_window::map::Map;
-use crate::{KeyedStream};
-use crate::block::OperatorStructure;
-use crate::operator::{Data, DataKey, StreamElement};
 use crate::operator::streaming_window::filter::Filter;
-use crate::operator::streaming_window::window_operators::fold::NestedFold;
+use crate::operator::streaming_window::flat_map::FlatMap;
+use crate::operator::streaming_window::flatten::Flatten;
+use crate::operator::streaming_window::map::Map;
 use crate::operator::streaming_window::window_operators::fold::Fold;
-use crate::operator::window::{KeyedWindowManager, WindowAccumulator, WindowDescription, WindowManager};
+use crate::operator::streaming_window::window_operators::fold::NestedFold;
+use crate::operator::{Data, DataKey};
 use crate::stream::Stream;
+use crate::KeyedStream;
 
 use crate::{operator::Operator, stream::KeyedItem};
 
-
 // proposta di enum per classificare tipi di dati provenienti dalla finestra
 //Item wrappa ogni elemento ricevuto dall'accumulatore prima di inviarlo al nuovo blocco
-//WindowClosed indica la fine degli elementi ricevuti dall'operatore 
+//WindowClosed indica la fine degli elementi ricevuti dall'operatore
 //da capire come gestire finestre a più livelli
 
 #[derive(Clone, Debug)]
@@ -30,69 +28,72 @@ pub enum WindowMsg<I> {
 pub trait Depth {
     //tipo che conserva la struttura che la chiave per tutte le profondità
     //E' lista concatenata ((() , id1) , id2) (finestra a due livelli)
-    type Path:DataKey;
+    type Path: DataKey + Debug;
     //valore della profondità
     const N: usize;
 }
 pub struct Zero;
-impl Depth for Zero  {
+impl Depth for Zero {
     type Path = ();
     const N: usize = 0;
 }
 pub struct Level<I>(PhantomData<I>);
 
-impl <D:Depth> Depth for Level<D>  {
-    type Path = (D::Path,u64);
+impl<D: Depth> Depth for Level<D> {
+    type Path = (D::Path, u64);
     const N: usize = D::N + 1;
 }
-pub struct FirstClassWindowedStream<Op,D>(pub Stream<Op>,PhantomData<D>) 
+pub struct FirstClassWindowedStream<Op, D>(pub Stream<Op>, PhantomData<D>)
 where
     Op: Operator,
     Op::Out: KeyedItem,
-    D:Depth;
+    D: Depth;
 
-impl <Op,D>FirstClassWindowedStream<Op,D>
+impl<Op, D> FirstClassWindowedStream<Op, D>
 where
-    Op:Operator,
+    Op: Operator,
     Op::Out: KeyedItem,
-    D:Depth
+    D: Depth,
 {
     pub(crate) fn new(stream: Stream<Op>) -> Self {
         FirstClassWindowedStream(stream, PhantomData)
     }
 }
 
-impl <Op,D> FirstClassWindowedStream<Op,D> where 
+impl<Op, D> FirstClassWindowedStream<Op, D>
+where
     Op: Operator + 'static,
     Op::Out: KeyedItem,
-    D:Depth,
+    D: Depth,
 {
-    pub(crate) fn add_operator<Op2,D2, GetOp>(self, get_operator: GetOp) -> FirstClassWindowedStream<Op2,D2>
+    pub(crate) fn add_operator<Op2, D2, GetOp>(
+        self,
+        get_operator: GetOp,
+    ) -> FirstClassWindowedStream<Op2, D2>
     where
         Op2: Operator,
-        D2:Depth,
+        D2: Depth,
         Op2::Out: KeyedItem<Key = D2::Path>,
         GetOp: FnOnce(Op) -> Op2,
     {
-        FirstClassWindowedStream(self.0.add_operator(get_operator),PhantomData)
+        FirstClassWindowedStream(self.0.add_operator(get_operator), PhantomData)
     }
 }
 
-
 //qui si implementano i metodi che fanno uscire lo stream dal contesto di FirstClass (Close + Riduttori)
-impl <Op> FirstClassWindowedStream <Op,Level<Zero>> where 
+impl<Op> FirstClassWindowedStream<Op, Level<Zero>>
+where
     Op: Operator + 'static,
     Op::Out: KeyedItem,
-{   
+{
     //andrà modificata in futuro
-    //ancora non è chiaro al 100% come uscire dal contesto di StreamingWindow 
+    //ancora non è chiaro al 100% come uscire dal contesto di StreamingWindow
     //
     pub fn close(self) -> KeyedStream<Op> {
-        
         KeyedStream(self.0)
     }
-    
-    pub(crate) fn add_operator_and_close<Op2,GetOp>(self, get_operator: GetOp) -> KeyedStream<Op2>
+
+    pub(crate) fn add_operator_and_close<Op2, GetOp>(self, get_operator: GetOp) -> KeyedStream<Op2>
     where
         Op2: Operator,
         Op2::Out: KeyedItem,
@@ -100,66 +101,128 @@ impl <Op> FirstClassWindowedStream <Op,Level<Zero>> where
     {
         KeyedStream(self.0.add_operator(get_operator))
     }
-
 }
 
-impl <Op> FirstClassWindowedStream <Op,Level<Zero>> where
-    
-    Op:Operator + 'static,
-    Op::Out:KeyedItem,
-
+impl<Op> FirstClassWindowedStream<Op, Level<Zero>>
+where
+    Op: Operator + 'static,
+    Op::Out: KeyedItem,
 {
-    pub fn fold<O,F,I>(self,init:O,f:F) -> KeyedStream<Fold<O,F,Op,I>>
-    where 
-        O:Data,
-        Op:Operator<Out = (<Level<Zero> as Depth>::Path, WindowMsg<I>)> + 'static,
-        F: Fn(&mut O,I) + Data + 'static,
-        I:Data
+    pub fn fold<O, F, I>(self, init: O, f: F) -> KeyedStream<Fold<O, F, Op, I>>
+    where
+        O: Data,
+        Op: Operator<Out = (<Level<Zero> as Depth>::Path, WindowMsg<I>)> + 'static,
+        F: Fn(&mut O, I) + Data + 'static,
+        I: Data,
     {
-        self.add_operator_and_close(|prev|Fold::new(prev,init,f))
+        self.add_operator_and_close(|prev| Fold::new(prev, init, f))
     }
 }
 //qui si implementano i metodi che chiudono una finestra ma ci mantengono nel contesto (risaliamo di un livello di profondità) (Riduttori)
-impl <Op,D,I> FirstClassWindowedStream <Op,Level<Level<D>>> where 
-    D:Depth,
-    Op:Operator<Out = (<Level<Level<D>> as Depth>::Path, WindowMsg<I>)> + 'static,
-    I: Data
+impl<Op, D, I> FirstClassWindowedStream<Op, Level<Level<D>>>
+where
+    D: Depth,
+    Op: Operator<Out = (<Level<Level<D>> as Depth>::Path, WindowMsg<I>)> + 'static,
+    I: Data,
 {
-    pub fn fold<O,F>(self,init:O,f:F) -> FirstClassWindowedStream<impl Operator<Out = (<Level<D> as Depth>::Path,WindowMsg<O>)>,Level<D>>
-    where 
-        O : Data,
-        F: Fn(&mut O,I) + Send + Clone + 'static,
-        {
-            self.add_operator(|prev|NestedFold::new(prev,init,f))
-        }  
+    pub fn fold<O, F>(
+        self,
+        init: O,
+        f: F,
+    ) -> FirstClassWindowedStream<
+        impl Operator<Out = (<Level<D> as Depth>::Path, WindowMsg<O>)>,
+        Level<D>,
+    >
+    where
+        O: Data,
+        F: Fn(&mut O, I) + Send + Clone + 'static,
+    {
+        self.add_operator(|prev| NestedFold::new(prev, init, f))
+    }
 }
 
 //qui si implementano i metodi che non modificano la profondità della finestra (Modificatori)
-impl <Op,D,I> FirstClassWindowedStream<Op,D>
-where 
-    D:Depth + 'static,
-    Op:Operator<Out = (D::Path, WindowMsg<I>)> + 'static,
-    I: Data
+impl<Op, D, I> FirstClassWindowedStream<Op, D>
+where
+    D: Depth + 'static,
+    Op: Operator<Out = (D::Path, WindowMsg<I>)> + 'static,
+    I: Data,
 {
     //filter è un'operazione non di riduzione ma di modifica degli elementi della finestra, dunque rimaniamo nel contesto
-    pub fn filter<F>(self,predicate: F) -> FirstClassWindowedStream<impl Operator<Out = (D::Path,WindowMsg<I>)>,D>
+    pub fn filter<F>(
+        self,
+        predicate: F,
+    ) -> FirstClassWindowedStream<impl Operator<Out = (D::Path, WindowMsg<I>)>, D>
     where
-        F: Fn(&I)-> bool + Clone + Send + 'static,
+        F: Fn(&I) -> bool + Clone + Send + 'static,
     {
         self.add_operator(|prev| Filter::new(prev, predicate))
     }
 
-    pub fn map<O: Data, F>(self, f: F) -> FirstClassWindowedStream<impl Operator<Out = (D::Path,WindowMsg<O>)>,D>
+    pub fn map<O: Data, F>(
+        self,
+        f: F,
+    ) -> FirstClassWindowedStream<impl Operator<Out = (D::Path, WindowMsg<O>)>, D>
     where
         F: Fn(I) -> O + Send + Clone + 'static,
     {
         self.add_operator(|prev| Map::new(prev, f))
     }
+
+    pub fn flatten(
+        self,
+    ) -> FirstClassWindowedStream<
+        impl Operator<Out = (D::Path, WindowMsg<<I as IntoIterator>::Item>)>,
+        D,
+    >
+    where
+        I: IntoIterator,
+        <I as IntoIterator>::IntoIter: Data,
+        <I as IntoIterator>::Item: Data,
+    {
+        self.add_operator(|prev| Flatten::new(prev))
+    }
+
+    pub fn flat_map<It, F>(
+        self,
+        f: F,
+    ) -> FirstClassWindowedStream<impl Operator<Out = (D::Path, WindowMsg<It::Item>)>, D>
+    where
+        It: IntoIterator,
+        It::IntoIter: Send,
+        It::Item: Data,
+        F: Fn(I) -> It + Clone + Send + 'static,
+    {
+        self.add_operator(|prev| FlatMap::new(prev, f))
+    }
 }
 
+/*
+//Nested Windowing
+#[derive(Clone)]
+pub(crate) struct FirstClassWindowManager<Key, In, Out, W: WindowManager> {
+    pub(crate) windows: HashMap<Key, W, GroupHasherBuilder>,
+    build: Arc<dyn Fn(&Key) -> W + Send + Sync>,
+    _in: PhantomData<In>,
+    _out: PhantomData<Out>,
+}
+impl<Key: DataKey, In, Out, W: WindowManager> FirstClassWindowManager<Key, In, Out, W> {
+    pub(crate) fn new(build: impl Fn(&Key) -> W + Send + Sync + 'static) -> Self {
+        Self {
+            windows: HashMap::default(),
+            build: Arc::new(build),
+            _in: PhantomData,
+            _out: PhantomData,
+        }
+    }
 
-//Nested Windowing 
- 
+    /// Stato della chiave, creato dalla factory se non esiste ancora
+    pub(crate) fn window_for(&mut self, key: &Key) -> &mut W {
+        let build = &self.build; // campo disgiunto da `windows`
+        self.windows.entry(key.clone()).or_insert_with(|| build(key))
+    }
+}
+
 pub struct FirstClassWindowedWithDescr<Op, WinOut, WinDescr,D>
 where
     Op: Operator,
@@ -182,6 +245,7 @@ fn control_msg<T, U>(el: StreamElement<T>) -> Option<StreamElement<U>> {
         StreamElement::Item(_) | StreamElement::Timestamped(_, _) => None,
     }
 }
+
 #[derive(Clone)]
 pub struct FirstClassWindowOperator<Key, In, Out, Prev, W>
 where
@@ -194,7 +258,7 @@ where
     /// It is used only for tracing purposes.
     name: String,
     /// The manager that will build the windows.
-    manager: KeyedWindowManager<Key, In, Out, W>,
+    manager: FirstClassWindowManager<Key, In, Out, W>,
     /// A buffer for storing ready items.
     output_buffer: VecDeque<StreamElement<(Key, Out)>>,
 }
@@ -207,17 +271,21 @@ where
     In: Data,
     D:Depth
 {
-    pub(crate) fn add_window_operator<A, NewOut>(
+    pub(crate) fn add_window_operator<A, NewOut, F>(
         self,
         name: &str,
-        accumulator: A,
+        make_acc: F,
     ) -> KeyedStream<impl Operator<Out = (Key, NewOut)>>
     where
         NewOut: Data,
         A: WindowAccumulator<In = In, Out = NewOut>,
+        F: Fn(&Key) -> A + Send + Sync + 'static,
+        WinDescr: Send + Sync + 'static,
     {
-        let init = self.descr.build::<A>(accumulator);
-        let manager = KeyedWindowManager::new(init);
+        let descr = self.descr; // build prende &self
+        let manager = FirstClassWindowManager::new(move |key: &Key| {
+            descr.build::<A>(make_acc(key))
+        });
 
         KeyedStream(
             self.inner
@@ -251,17 +319,11 @@ where
     Out: Data,
 {
     fn process_item(&mut self, key: Key, el: StreamElement<In>) {
-        let mgr = self
-            .manager
-            .windows
-            .entry(key.clone())
-            .or_insert_with(|| self.manager.init.clone());
-
-        let ret = mgr.process(el);
-        self.output_buffer.extend(
-            ret.into_iter()
-                .map(|e| StreamElement::from(e).add_key(key.clone())),
-        );
+    let mgr = self.manager.window_for(&key);
+    let ret = mgr.process(el);
+    self.output_buffer.extend(
+        ret.into_iter().map(|e| StreamElement::from(e).add_key(key.clone())),
+    );
     }
 }
 
@@ -293,20 +355,9 @@ where
                 StreamElement::Timestamped((id,WindowMsg::Item(item)),ts ) => {
                     self.process_item(id, StreamElement::Timestamped(item,ts));
                 }
-                StreamElement::Item((id,WindowMsg::WindowClosed)) 
-                | StreamElement::Timestamped((id,WindowMsg::WindowClosed ),_) => {
-                    let mgr = self
-                        .manager
-                        .windows
-                        .entry(id.clone())
-                        .or_insert_with(|| self.manager.init.clone());
-                    let ret = mgr.process(StreamElement::FlushAndRestart);
-                    self.output_buffer.extend(
-                    ret.into_iter()
-                        .map(|e| StreamElement::from(e).add_key(id.clone())),
-                    );
-                    // la finestra esterna è chiusa: libero lo stato di questa chiave
-                    self.manager.windows.remove(&id);
+                StreamElement::Item((id,WindowMsg::WindowClosed))
+                |StreamElement::Timestamped((id,WindowMsg::WindowClosed ),_) => {
+                    let mgr = self.manager.window_for(&id);
                 }
                 StreamElement::FlushBatch => return StreamElement::FlushBatch,
 
@@ -347,7 +398,7 @@ where
     pub(crate) fn new(
         prev: Prev,
         name: String,
-        manager: KeyedWindowManager<Key, In, Out, W>,
+        manager: FirstClassWindowManager<Key, In, Out, W>,
     ) -> Self {
         Self {
             prev,
@@ -370,5 +421,4 @@ where
     ) -> FirstClassWindowedWithDescr<Op, WinOut, WinDescr,Level<D>> {
         FirstClassWindowedWithDescr { inner: self, descr, _win_out: PhantomData }
     }
-}
-
+}*/

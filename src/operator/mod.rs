@@ -92,9 +92,9 @@ mod route;
 pub mod sink;
 pub mod source;
 mod start;
+pub mod streaming_window;
 pub mod window;
 mod zip;
-pub mod streaming_window;
 
 /// Marker trait that all the types inside a stream should implement.
 pub trait Data: Clone + Send + 'static {}

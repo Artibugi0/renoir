@@ -5,9 +5,9 @@ use std::collections::HashSet;
 use std::hash::Hash;
 
 #[derive(Clone)]
-pub(crate) struct CountDistinct<T>(usize,HashSet<T>);
+pub(crate) struct CountDistinct<T>(usize, HashSet<T>);
 
-impl <T: Data + Ord + Hash> WindowAccumulator for CountDistinct<T>{
+impl<T: Data + Ord + Hash> WindowAccumulator for CountDistinct<T> {
     type In = T;
     type Out = usize;
 
@@ -25,16 +25,14 @@ impl <T: Data + Ord + Hash> WindowAccumulator for CountDistinct<T>{
 }
 
 impl<Key, Out, WindowDescr, OperatorChain> WindowedStream<OperatorChain, Out, WindowDescr>
-where 
+where
     WindowDescr: WindowDescription<Out>,
     OperatorChain: Operator<Out = (Key, Out)> + 'static,
     Key: DataKey,
     Out: Data + Ord + Hash,
 {
     pub fn count_distinct(self) -> KeyedStream<impl Operator<Out = (Key, usize)>> {
-        let acc= CountDistinct(0,HashSet::new());
+        let acc = CountDistinct(0, HashSet::new());
         self.add_window_operator("WindowCountDistinct", acc)
     }
 }
-
-

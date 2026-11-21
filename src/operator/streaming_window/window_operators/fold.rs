@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
-
-
 use crate::block::{BlockStructure, OperatorStructure};
 use crate::operator::streaming_window::streamingwindow::WindowMsg;
 use crate::operator::{Data, DataKey, Operator, StreamElement, Timestamp};
@@ -12,22 +10,22 @@ use crate::scheduler::ExecutionMetadata;
 //ognuno associato ad una particolare finestra
 //il resto dell'implementazione è simile a quella usata per stream normali
 
-//TODO: l'implementazione,adesso come adesso quando prende windowclosed e lo consuma 
-//poichè come output 
+//TODO: l'implementazione,adesso come adesso quando prende windowclosed e lo consuma
+//poichè come output
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub struct Fold<O, F, Op, I>
 where
     O: Send + Clone,
-    F: Fn(&mut O,I) + Send + Clone,
-    Op: Operator<Out = (((),u64),WindowMsg<I>)>,
+    F: Fn(&mut O, I) + Send + Clone,
+    Op: Operator<Out = (((), u64), WindowMsg<I>)>,
 {
     prev: Op,
     #[derivative(Debug = "ignore")]
     fold: F,
     init: O,
     //hashmap con chiave id della finestra
-    accumulators: HashMap<((),u64),(O, Option<Timestamp>)>,
+    accumulators: HashMap<((), u64), (O, Option<Timestamp>)>,
     timestamp: Option<Timestamp>,
     max_watermark: Option<Timestamp>,
     received_end: bool,
@@ -38,8 +36,8 @@ impl<O, F, Op, I> Display for Fold<O, F, Op, I>
 where
     O: Data,
     F: Fn(&mut O, I) + Send + Clone,
-    Op: Operator<Out = (((),u64),WindowMsg<I>)>,
-    I:Data
+    Op: Operator<Out = (((), u64), WindowMsg<I>)>,
+    I: Data,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -55,12 +53,11 @@ where
 impl<O, F, Op, I> Fold<O, F, Op, I>
 where
     O: Data,
-    F: Fn(&mut O,I) + Send + Clone,
+    F: Fn(&mut O, I) + Send + Clone,
     Op: Operator,
-    Op: Operator<Out = (((),u64),WindowMsg<I>)>,
-
+    Op: Operator<Out = (((), u64), WindowMsg<I>)>,
 {
-    pub(crate)fn new(prev: Op, init: O, fold: F) -> Self {
+    pub(crate) fn new(prev: Op, init: O, fold: F) -> Self {
         Fold {
             prev,
             fold,
@@ -77,54 +74,52 @@ where
 impl<O, F, Op, I> Operator for Fold<O, F, Op, I>
 where
     O: Data,
-    F: Fn(&mut O,I) + Send + Clone,
+    F: Fn(&mut O, I) + Send + Clone,
     Op: Operator,
-    Op: Operator<Out = (((),u64),WindowMsg<I>)>,
-    I: Data
+    Op: Operator<Out = (((), u64), WindowMsg<I>)>,
+    I: Data,
 {
     //da capire che chiave associamo all'output al di fuori del contesto first class
     type Out = ((), O);
 
     fn setup(&mut self, metadata: &mut ExecutionMetadata) {
-       self.prev.setup(metadata); 
+        self.prev.setup(metadata);
     }
 
     fn next(&mut self) -> StreamElement<Self::Out> {
         while !self.received_end {
             match self.prev.next() {
-
                 //match si aspetta elementi della finestra, accumulatori creati/aggiornati in base all'id della finestra
                 //associato all'elemento
                 StreamElement::Item((id, WindowMsg::Item(x))) => {
-                    let (acc,_) = 
-                        self.accumulators
+                    let (acc, _) = self
+                        .accumulators
                         .entry(id)
-                        .or_insert_with(|| (self.init.clone(),None));
-                    (self.fold)(acc,x); 
+                        .or_insert_with(|| (self.init.clone(), None));
+                    (self.fold)(acc, x);
                 }
                 StreamElement::Timestamped((id, WindowMsg::Item(x)), ts) => {
                     self.timestamp = Some(self.timestamp.unwrap_or(ts).max(ts));
-                    let (acc,t) = 
-                        self.accumulators
+                    let (acc, t) = self
+                        .accumulators
                         .entry(id)
-                        .or_insert_with(|| (self.init.clone(),None));
+                        .or_insert_with(|| (self.init.clone(), None));
                     *t = Some(t.unwrap_or(ts).max(ts));
-                    (self.fold)(acc,x); 
+                    (self.fold)(acc, x);
                 }
                 //se ricevo windowclosed so che teoricamente elementi della finestra sono esauriti
                 //sputo fuori l'accumulatore completato e cancello l'entry dalla mappa
                 StreamElement::Item((id, WindowMsg::WindowClosed))
                 | StreamElement::Timestamped((id, WindowMsg::WindowClosed), _) => {
-                if let Some((acc, ts)) = self.accumulators.remove(&id) {
-                    let elem = (id.0,acc);
-                    return match ts {
-                        Some(ts) => StreamElement::Timestamped(elem, ts),
-                        None => StreamElement::Item(elem),
-                    };
+                    if let Some((acc, ts)) = self.accumulators.remove(&id) {
+                        let elem = (id.0, acc);
+                        return match ts {
+                            Some(ts) => StreamElement::Timestamped(elem, ts),
+                            None => StreamElement::Item(elem),
+                        };
+                    }
                 }
-            }                
-                //logica invariata     
-
+                //logica invariata
                 StreamElement::Terminate => self.received_end = true,
                 StreamElement::FlushAndRestart => {
                     self.received_end = true;
@@ -156,25 +151,25 @@ where
     fn structure(&self) -> BlockStructure {
         self.prev
             .structure()
-            .add_operator(OperatorStructure::new::<O, _>("Streaming_Window_Fold_Not_Nested"))
+            .add_operator(OperatorStructure::new::<O, _>("StreamingWindow_Fold"))
     }
 }
 
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
-pub (crate) struct NestedFold<O, F, Op, P, I>
+pub(crate) struct NestedFold<O, F, Op, P, I>
 where
     O: Send + Clone,
-    F: Fn(&mut O,I) + Send + Clone,
-    Op: Operator<Out = ((P,u64),WindowMsg<I>)>,
-    P:DataKey
+    F: Fn(&mut O, I) + Send + Clone,
+    Op: Operator<Out = ((P, u64), WindowMsg<I>)>,
+    P: DataKey,
 {
     prev: Op,
     #[derivative(Debug = "ignore")]
     fold: F,
     init: O,
     //hashmap con chiave id della finestra
-    accumulators: HashMap<(P,u64),(O, Option<Timestamp>)>,
+    accumulators: HashMap<(P, u64), (O, Option<Timestamp>)>,
     timestamp: Option<Timestamp>,
     max_watermark: Option<Timestamp>,
     received_end: bool,
@@ -185,9 +180,9 @@ impl<O, F, Op, P, I> Display for NestedFold<O, F, Op, P, I>
 where
     O: Data,
     F: Fn(&mut O, I) + Send + Clone,
-    Op: Operator<Out = ((P,u64), WindowMsg<I>)>,
-    P:DataKey,
-    I:Data
+    Op: Operator<Out = ((P, u64), WindowMsg<I>)>,
+    P: DataKey,
+    I: Data,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -203,10 +198,10 @@ where
 impl<O, F, Op, P, I> NestedFold<O, F, Op, P, I>
 where
     O: Data,
-    F: Fn(&mut O,I) + Send + Clone,
+    F: Fn(&mut O, I) + Send + Clone,
     Op: Operator,
-    Op: Operator<Out = ((P,u64),WindowMsg<I>)>,
-    P: DataKey
+    Op: Operator<Out = ((P, u64), WindowMsg<I>)>,
+    P: DataKey,
 {
     pub(crate) fn new(prev: Op, init: O, fold: F) -> Self {
         NestedFold {
@@ -225,55 +220,53 @@ where
 impl<O, F, Op, P, I> Operator for NestedFold<O, F, Op, P, I>
 where
     O: Data,
-    F: Fn(&mut O,I) + Send + Clone,
+    F: Fn(&mut O, I) + Send + Clone,
     Op: Operator,
-    Op: Operator<Out = ((P,u64),WindowMsg<I>)>,
+    Op: Operator<Out = ((P, u64), WindowMsg<I>)>,
     P: DataKey,
-    I: Data
+    I: Data,
 {
-    type Out = (P,WindowMsg<O>);
+    type Out = (P, WindowMsg<O>);
 
     fn setup(&mut self, metadata: &mut ExecutionMetadata) {
-       self.prev.setup(metadata); 
+        self.prev.setup(metadata);
     }
 
     fn next(&mut self) -> StreamElement<Self::Out> {
         while !self.received_end {
             match self.prev.next() {
-
                 //match si aspetta elementi della finestra, accumulatori creati/aggiornati in base all'id della finestra
                 //associato all'elemento
                 StreamElement::Item((id, WindowMsg::Item(x))) => {
-                    let (acc,_) = 
-                        self.accumulators
+                    let (acc, _) = self
+                        .accumulators
                         .entry(id)
-                        .or_insert_with(|| (self.init.clone(),None));
-                    (self.fold)(acc,x); 
+                        .or_insert_with(|| (self.init.clone(), None));
+                    (self.fold)(acc, x);
                 }
                 //timestamp gestiti come nell'implementazione di base
                 StreamElement::Timestamped((id, WindowMsg::Item(x)), ts) => {
                     self.timestamp = Some(self.timestamp.unwrap_or(ts).max(ts));
-                    let (acc,t) = 
-                        self.accumulators
+                    let (acc, t) = self
+                        .accumulators
                         .entry(id)
-                        .or_insert_with(|| (self.init.clone(),None));
+                        .or_insert_with(|| (self.init.clone(), None));
                     *t = Some(t.unwrap_or(ts).max(ts));
-                    (self.fold)(acc,x); 
+                    (self.fold)(acc, x);
                 }
                 //se ricevo windowclosed so che teoricamente elementi della finestra sono esauriti
                 //sputo fuori l'accumulatore completato e cancello l'entry dalla mappa
                 StreamElement::Item((id, WindowMsg::WindowClosed))
                 | StreamElement::Timestamped((id, WindowMsg::WindowClosed), _) => {
-                if let Some((acc, ts)) = self.accumulators.remove(&id) {
-                    let elem = (id.0,WindowMsg::Item(acc));
-                    return match ts {
-                        Some(ts) => StreamElement::Timestamped(elem, ts),
-                        None => StreamElement::Item(elem),
-                    };
+                    if let Some((acc, ts)) = self.accumulators.remove(&id) {
+                        let elem = (id.0, WindowMsg::Item(acc));
+                        return match ts {
+                            Some(ts) => StreamElement::Timestamped(elem, ts),
+                            None => StreamElement::Item(elem),
+                        };
+                    }
                 }
-            }                
-                //logica invariata     
-
+                //logica invariata
                 StreamElement::Terminate => self.received_end = true,
                 StreamElement::FlushAndRestart => {
                     self.received_end = true;
@@ -305,7 +298,6 @@ where
     fn structure(&self) -> BlockStructure {
         self.prev
             .structure()
-            .add_operator(OperatorStructure::new::<O, _>("Streaming_Window_NestedFold"))
+            .add_operator(OperatorStructure::new::<O, _>("StreamingWindow_NestedFold"))
     }
 }
-

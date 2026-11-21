@@ -1,28 +1,28 @@
 use std::fmt::Display;
 
 use crate::block::{BlockStructure, OperatorStructure};
-use crate::operator::streaming_window::streamingwindow:: WindowMsg;
+use crate::operator::streaming_window::streamingwindow::WindowMsg;
 use crate::operator::{Data, DataKey, Operator, StreamElement};
 use crate::scheduler::ExecutionMetadata;
 
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct Map<P,I,O, F, Op>
+pub struct Map<P, I, O, F, Op>
 where
     O: Send,
     F: Fn(I) -> O + Send + Clone,
-    Op: Operator<Out = (P,WindowMsg<I>)>,
+    Op: Operator<Out = (P, WindowMsg<I>)>,
 {
     prev: Op,
     #[derivative(Debug = "ignore")]
-    f: F
+    f: F,
 }
 
-impl<P,I,O, F, Op> Clone for Map<P,I,O, F, Op>
+impl<P, I, O, F, Op> Clone for Map<P, I, O, F, Op>
 where
     O: Send,
     F: Fn(I) -> O + Send + Clone,
-    Op: Operator<Out = (P,WindowMsg<I>)>,
+    Op: Operator<Out = (P, WindowMsg<I>)>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -32,11 +32,11 @@ where
     }
 }
 
-impl<P,I,O, F, Op> Display for Map<P,I,O, F, Op>
+impl<P, I, O, F, Op> Display for Map<P, I, O, F, Op>
 where
     O: Send,
     F: Fn(I) -> O + Send + Clone,
-    Op: Operator<Out = (P,WindowMsg<I>)>,
+    Op: Operator<Out = (P, WindowMsg<I>)>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -49,28 +49,28 @@ where
     }
 }
 
-impl<P,I,O, F, Op> Map<P,I,O, F, Op>
+impl<P, I, O, F, Op> Map<P, I, O, F, Op>
 where
     P: DataKey,
     I: Data,
     O: Data,
     F: Fn(I) -> O + Send + Clone,
-    Op: Operator<Out = (P,WindowMsg<I>)>,
+    Op: Operator<Out = (P, WindowMsg<I>)>,
 {
     pub(super) fn new(prev: Op, f: F) -> Self {
         Self { prev, f }
     }
 }
 
-impl<P,I,O, F, Op> Operator for Map<P,I,O, F, Op>
+impl<P, I, O, F, Op> Operator for Map<P, I, O, F, Op>
 where
     P: DataKey,
     I: Data,
     O: Data,
     F: Fn(I) -> O + Send + Clone,
-    Op: Operator<Out = (P,WindowMsg<I>)>,
+    Op: Operator<Out = (P, WindowMsg<I>)>,
 {
-    type Out = (P,WindowMsg<O>);
+    type Out = (P, WindowMsg<O>);
 
     fn setup(&mut self, metadata: &mut ExecutionMetadata) {
         self.prev.setup(metadata);
@@ -84,7 +84,9 @@ where
     fn structure(&self) -> BlockStructure {
         self.prev
             .structure()
-            .add_operator(OperatorStructure::new::<Self::Out, _>("Streaming_Window_Map"))
+            .add_operator(OperatorStructure::new::<Self::Out, _>(
+                "StreamingWindow_Map",
+            ))
     }
 }
 
@@ -109,9 +111,3 @@ impl<P, I> StreamElement<(P, WindowMsg<I>)> {
         }
     }
 }
-
-
-
-   
-
-
