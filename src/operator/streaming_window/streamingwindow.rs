@@ -5,6 +5,8 @@ use crate::operator::streaming_window::filter::Filter;
 use crate::operator::streaming_window::flat_map::FlatMap;
 use crate::operator::streaming_window::flatten::Flatten;
 use crate::operator::streaming_window::map::Map;
+use crate::operator::streaming_window::window_operators::count::Count;
+use crate::operator::streaming_window::window_operators::count::NestedCount;
 use crate::operator::streaming_window::window_operators::fold::Fold;
 use crate::operator::streaming_window::window_operators::fold::NestedFold;
 use crate::operator::{Data, DataKey};
@@ -93,6 +95,7 @@ where
         KeyedStream(self.0)
     }
 
+    //metodo usato per aggiungere un operatore di aggregazione ed uscire fuori dal contesto di FirstClassWindowedStream
     pub(crate) fn add_operator_and_close<Op2, GetOp>(self, get_operator: GetOp) -> KeyedStream<Op2>
     where
         Op2: Operator,
@@ -117,6 +120,14 @@ where
     {
         self.add_operator_and_close(|prev| Fold::new(prev, init, f))
     }
+
+    pub fn count<I>(self) -> KeyedStream<Count<Op, I>>
+    where
+        I: Data,
+        Op: Operator<Out = (<Level<Zero> as Depth>::Path, WindowMsg<I>)> + 'static,
+    {
+        self.add_operator_and_close(|prev| Count::new(prev))
+    }
 }
 //qui si implementano i metodi che chiudono una finestra ma ci mantengono nel contesto (risaliamo di un livello di profondità) (Riduttori)
 impl<Op, D, I> FirstClassWindowedStream<Op, Level<Level<D>>>
@@ -138,6 +149,15 @@ where
         F: Fn(&mut O, I) + Send + Clone + 'static,
     {
         self.add_operator(|prev| NestedFold::new(prev, init, f))
+    }
+
+    pub fn count(
+        self,
+    ) -> FirstClassWindowedStream<
+        impl Operator<Out = (<Level<D> as Depth>::Path, WindowMsg<usize>)>,
+        Level<D>,
+    > {
+        self.add_operator(|prev| NestedCount::new(prev))
     }
 }
 
