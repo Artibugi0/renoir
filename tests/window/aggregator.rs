@@ -375,6 +375,34 @@ fn streaming_window_test_nested() {
     });
 }
 
+/// The outer fold must emit each outer window when that window closes, not all at the end of the
+/// stream. Results are checked in order: flushing at the end would emit them in arbitrary order.
+#[test]
+fn streaming_window_test_nested_emits_on_close() {
+    TestHelper::local_remote_env(|env| {
+        let source = IteratorSource::new(0..300u64);
+        let res = env
+            .stream(source)
+            .window_all(CountWindow::tumbling(10))
+            .to_streaming_window()
+            .window(CountWindow::tumbling(2))
+            .to_streaming_window()
+            .fold(0, |acc, x| *acc += x)
+            .fold(1, |acc, x| *acc *= x)
+            .drop_key()
+            .collect_vec();
+
+        env.execute_blocking();
+
+        if let Some(res) = res.get() {
+            let expected = (0..30u64)
+                .map(|w| (0..5).map(|p| (10 * w + 2 * p) * 2 + 1).product::<u64>())
+                .collect::<Vec<_>>();
+            assert_eq!(res, expected);
+        }
+    });
+}
+
 /*
         //#[test]
 fn streaming_window_key_per_window() {

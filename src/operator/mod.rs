@@ -204,6 +204,18 @@ impl<Out> StreamElement<Out> {
         }
     }
 
+    /// Copy a watermark or system message (`Terminate`, `FlushAndRestart`, `FlushBatch`) into a
+    /// `StreamElement` of any type. Returns `None` if `self` carries an item.
+    pub fn as_system<NewOut>(&self) -> Option<StreamElement<NewOut>> {
+        match self {
+            StreamElement::Item(_) | StreamElement::Timestamped(_, _) => None,
+            StreamElement::Watermark(w) => Some(StreamElement::Watermark(*w)),
+            StreamElement::Terminate => Some(StreamElement::Terminate),
+            StreamElement::FlushAndRestart => Some(StreamElement::FlushAndRestart),
+            StreamElement::FlushBatch => Some(StreamElement::FlushBatch),
+        }
+    }
+
     /// Change the type of the element inside the `StreamElement`.
     pub fn map<NewOut>(self, f: impl FnOnce(Out) -> NewOut) -> StreamElement<NewOut> {
         match self {

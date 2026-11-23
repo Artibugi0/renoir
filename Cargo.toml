@@ -10,7 +10,6 @@ authors = [
 ]
 license = "LGPL-3.0-or-later"
 repository = "https://github.com/deib-polimi/renoir"
-homepage = "https://github.com/deib-polimi/renoir"
 readme = "README.md"
 
 [features]

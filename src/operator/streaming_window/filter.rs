@@ -6,8 +6,7 @@ use crate::operator::streaming_window::streamingwindow::WindowItem;
 use crate::operator::{Operator, StreamElement};
 use crate::scheduler::ExecutionMetadata;
 
-//variante di filter per StreamingWindow, adattata per ricevere gli elementi della enum WindowMsg
-//cambiano i generici utilizzati,manca qualcosa/va modificato?
+// Filter for windowed items: `Close` markers always pass through.
 #[derive(Clone)]
 pub struct Filter<Op, F, K, T, I>
 where
@@ -69,7 +68,7 @@ where
             match self.prev.next() {
                 StreamElement::Item(WindowItem::Item { ref item, .. })
                 | StreamElement::Timestamped(WindowItem::Item { ref item, .. }, _)
-                    if !(self.predicate)(item) => {} // scarta
+                    if !(self.predicate)(item) => {} // drop
                 element => return element,
             }
         }

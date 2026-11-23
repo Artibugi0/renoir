@@ -1,15 +1,14 @@
 use crate::operator::streaming_window::filter::Filter;
 use crate::operator::streaming_window::map::Map;
 use crate::operator::streaming_window::window_operators::fold::Fold;
-use crate::operator::window::{StreamingWindowDescription, WindowDescription};
+use crate::operator::window::StreamingWindowDescription;
 use std::hash::Hash;
 use std::marker::PhantomData;
-// use crate::operator::streaming_window::window_operators::fold::NestedFold;
-use crate::operator::{Data, DataKey, StreamElement};
+use crate::operator::{Data, DataKey};
 use crate::stream::Stream;
 use crate::KeyedStream;
 
-use crate::{operator::Operator, stream::KeyedItem};
+use crate::operator::Operator;
 
 pub type TagId = u64;
 
@@ -66,18 +65,12 @@ impl<K, T, I> WindowItem<K, ChainTag<T>, I> {
         match inner {
             InnerWindowItem::Item { tag, item } => Self::Item {
                 key,
-                tag: ChainTag {
-                    parent: parent_tag,
-                    value: tag,
-                },
+                tag: ChainTag::new(parent_tag, tag),
                 item,
             },
             InnerWindowItem::Close { tag } => Self::Close {
                 key,
-                tag: ChainTag {
-                    parent: parent_tag,
-                    value: tag,
-                },
+                tag: ChainTag::new(parent_tag, tag),
             },
         }
     }
@@ -123,10 +116,28 @@ pub trait WindowTag: Eq + Hash + Clone + Send {
     fn into_parent(self) -> Self::Parent;
 }
 
+/// Tag of a window nested inside the window tagged `parent`.
+///
+/// `value` is `None` for the tag of the enclosing window itself: a `Close` with such a tag means
+/// that the window `parent` is closed, and it is forwarded after all the closes of its sub-windows.
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct ChainTag<P> {
     parent: P,
-    value: TagId,
+    value: Option<TagId>,
+}
+
+impl<P> ChainTag<P> {
+    pub fn new(parent: P, value: TagId) -> Self {
+        Self { parent, value: Some(value) }
+    }
+
+    pub fn parent_tag(parent: P) -> Self {
+        Self { parent, value: None }
+    }
+
+    pub fn is_parent_tag(&self) -> bool {
+        self.value.is_none()
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -192,13 +203,6 @@ where
     K: DataKey,
     I: Data,
 {
-    //andrà modificata in futuro
-    //ancora non è chiaro al 100% come uscire dal contesto di StreamingWindow
-    //
-    // pub fn close(self) -> KeyedStream<Op> {
-    //     KeyedStream(self.0)
-    // }
-
     pub(crate) fn add_operator_and_close<O, Op2, GetOp>(
         self,
         get_operator: GetOp,

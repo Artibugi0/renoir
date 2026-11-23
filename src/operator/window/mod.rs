@@ -9,7 +9,7 @@ pub use descr::*;
 // pub use description::*;
 
 use crate::block::{GroupHasherBuilder, OperatorStructure, Replication};
-use crate::operator::streaming_window::streamingwindow::{ChainTag, InnerWindowItem, NoTag, TagId, WindowItem, WindowTag};
+use crate::operator::streaming_window::streamingwindow::{InnerWindowItem, TagId};
 use crate::operator::{Data, DataKey, ExchangeData, Operator, StreamElement, Timestamp};
 use crate::stream::{KeyedStream, Stream, WindowedStream};
 
