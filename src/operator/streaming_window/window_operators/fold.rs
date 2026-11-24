@@ -8,7 +8,10 @@ use crate::scheduler::ExecutionMetadata;
 
 /// Folds the items of each window into one accumulator, kept in a map keyed by `(key, window tag)`.
 ///
-/// A `Close` emits the accumulator of that window, tagged with the parent tag.
+/// A `Close` emits the accumulator of that window, tagged with the parent tag. The result is
+/// timestamped with the timestamp of the `Close` (the end of the window), if it has one, otherwise
+/// with the largest timestamp of the folded items.
+/// Watermarks are forwarded immediately: results of closed windows always precede them.
 /// At the end of the stream the accumulators of windows that are still open are emitted too.
 /// The `Close` of a window is consumed, the one of the enclosing window is forwarded.
 #[derive(Clone, Derivative)]
@@ -27,7 +30,6 @@ where
     accumulators: HashMap<(K, T), (O, Option<Timestamp>)>,
     #[derivative(Debug = "ignore")]
     ready: Vec<StreamElement<WindowItem<K, T::Parent, O>>>,
-    max_watermark: Option<Timestamp>,
     received_end: bool,
     received_end_iter: bool,
 }
@@ -67,7 +69,6 @@ where
             init,
             accumulators: HashMap::new(),
             ready: Vec::new(),
-            max_watermark: None,
             received_end: false,
             received_end_iter: false,
         }
@@ -93,9 +94,31 @@ fn emit<K, T: WindowTag, O>(
     ts: Option<Timestamp>,
 ) -> StreamElement<WindowItem<K, T::Parent, O>> {
     let el = WindowItem::new_item(key, tag.into_parent(), acc);
-    match ts {
-        Some(ts) => StreamElement::Timestamped(el, ts),
-        None => StreamElement::Item(el),
+    StreamElement::new_item(el, ts)
+}
+
+impl<K, T, I, O, F, Op> Fold<K, ChainTag<T>, I, O, F, Op>
+where
+    O: Data,
+    F: Fn(&mut O, I) + Send + Clone,
+    Op: Operator<Out = WindowItem<K, ChainTag<T>, I>>,
+    K: DataKey,
+    T: WindowTag,
+{
+    /// Handle the `Close` of the window `tag`, or of its enclosing window (see `ChainTag`).
+    fn close(
+        &mut self,
+        key: K,
+        tag: ChainTag<T>,
+        ts: Option<Timestamp>,
+    ) -> Option<StreamElement<WindowItem<K, T, O>>> {
+        if tag.is_parent_tag() {
+            // all the sub-windows of the enclosing window were already emitted
+            let close = WindowItem::new_close(key, tag.into_parent());
+            return Some(StreamElement::new_item(close, ts));
+        }
+        let (acc, acc_ts) = self.accumulators.remove(&(key.clone(), tag.clone()))?;
+        Some(emit(key, tag, acc, ts.or(acc_ts)))
     }
 }
 
@@ -123,14 +146,14 @@ where
                 StreamElement::Timestamped(WindowItem::Item { key, tag, item }, ts) => {
                     self.accumulate(key, tag, item, Some(ts))
                 }
-                StreamElement::Item(WindowItem::Close { key, tag })
-                | StreamElement::Timestamped(WindowItem::Close { key, tag }, _) => {
-                    if tag.is_parent_tag() {
-                        // the enclosing window is closed: all its sub-windows were already emitted
-                        return StreamElement::Item(WindowItem::new_close(key, tag.into_parent()));
+                StreamElement::Item(WindowItem::Close { key, tag }) => {
+                    if let Some(el) = self.close(key, tag, None) {
+                        return el;
                     }
-                    if let Some((acc, ts)) = self.accumulators.remove(&(key.clone(), tag.clone())) {
-                        return emit(key, tag, acc, ts);
+                }
+                StreamElement::Timestamped(WindowItem::Close { key, tag }, ts) => {
+                    if let Some(el) = self.close(key, tag, Some(ts)) {
+                        return el;
                     }
                 }
                 StreamElement::Terminate => self.received_end = true,
@@ -138,9 +161,7 @@ where
                     self.received_end = true;
                     self.received_end_iter = true;
                 }
-                StreamElement::Watermark(ts) => {
-                    self.max_watermark = Some(self.max_watermark.unwrap_or(ts).max(ts))
-                }
+                StreamElement::Watermark(ts) => return StreamElement::Watermark(ts),
                 // this block won't send anything until the stream ends
                 StreamElement::FlushBatch => {}
             }
@@ -155,10 +176,6 @@ where
 
         if let Some(elem) = self.ready.pop() {
             return elem;
-        }
-
-        if let Some(ts) = self.max_watermark.take() {
-            return StreamElement::Watermark(ts);
         }
 
         // the end was not really the end... just the end of one iteration!

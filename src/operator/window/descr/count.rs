@@ -154,6 +154,8 @@ impl<T: Data> WindowDescription<T> for CountWindow {
     }
 }
 
+// Streaming
+
 impl StreamingWindowDescription for CountWindow {
     type Tagger = CountWindowTagger;
 
@@ -190,10 +192,12 @@ impl Clone for CountWindowTagger {
 }
 
 impl WindowTagger for CountWindowTagger {
+    /// Outputs inherit the timestamp (if any) of the element that triggered them.
     fn tag<T: Data>(
         &mut self,
         el: StreamElement<InnerWindowItem<(), T>>,
-    ) -> Vec<InnerWindowItem<TagId, T>> {
+    ) -> Vec<StreamElement<InnerWindowItem<TagId, T>>> {
+        let ts = el.timestamp().copied();
         match el {
             StreamElement::Item(InnerWindowItem::Item { item, .. })
             | StreamElement::Timestamped(InnerWindowItem::Item { item, .. }, _) => {
@@ -205,13 +209,13 @@ impl WindowTagger for CountWindowTagger {
                 let mut ret: Vec<_> = (0..k)
                     .map(|i| {
                         self.ws[i].count += 1;
-                        InnerWindowItem::new_item(self.ws[i].acc, item.clone())
+                        StreamElement::new_item(InnerWindowItem::new_item(self.ws[i].acc, item.clone()), ts)
                     })
                     .collect();
 
                 if self.ws[0].count == self.size {
                     let r = self.ws.pop_front().unwrap();
-                    ret.push(InnerWindowItem::new_close(r.acc));
+                    ret.push(StreamElement::new_item(InnerWindowItem::new_close(r.acc), ts));
                 }
                 ret
             }
@@ -225,7 +229,7 @@ impl WindowTagger for CountWindowTagger {
                     self.ws
                         .pop_front()
                         .filter(|r| r.count > 0)
-                        .map(|r| InnerWindowItem::new_close(r.acc))
+                        .map(|r| StreamElement::new_item(InnerWindowItem::new_close(r.acc), ts))
                         .into_iter()
                         .collect()
                 };

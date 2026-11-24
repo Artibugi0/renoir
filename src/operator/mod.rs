@@ -183,6 +183,14 @@ pub trait Operator: Clone + Send + Display {
 }
 
 impl<Out> StreamElement<Out> {
+    /// `Timestamped` if a timestamp is given, `Item` otherwise.
+    pub fn new_item(item: Out, ts: Option<Timestamp>) -> Self {
+        match ts {
+            Some(ts) => StreamElement::Timestamped(item, ts),
+            None => StreamElement::Item(item),
+        }
+    }
+
     pub fn item(&self) -> Option<&Out> {
         if let StreamElement::Item(item) | StreamElement::Timestamped(item, _) = self {
             Some(item)

@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use itertools::{process_results, Itertools};
@@ -88,6 +88,55 @@ impl<Out: Data, PreviousOperator: Operator<Out = Out>> Operator
             _ => {}
         }
         item
+    }
+
+    fn structure(&self) -> BlockStructure {
+        Default::default()
+    }
+}
+
+/// A fake operator that records the timestamps of the items and watermarks it receives, in order.
+/// Each entry is `(is_watermark, timestamp)`.
+#[derive(Clone)]
+pub struct TimestampRecorder<Out: Data, PreviousOperator>
+where
+    PreviousOperator: Operator<Out = Out>,
+{
+    prev: PreviousOperator,
+    seen: Arc<Mutex<Vec<(bool, Timestamp)>>>,
+}
+
+impl<Out: Data, PreviousOperator: Operator<Out = Out>> TimestampRecorder<Out, PreviousOperator> {
+    pub fn new(prev: PreviousOperator, seen: Arc<Mutex<Vec<(bool, Timestamp)>>>) -> Self {
+        Self { prev, seen }
+    }
+}
+
+impl<Out: Data, PreviousOperator: Operator<Out = Out>> Display
+    for TimestampRecorder<Out, PreviousOperator>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TimestampRecorder")
+    }
+}
+
+impl<Out: Data, PreviousOperator: Operator<Out = Out>> Operator
+    for TimestampRecorder<Out, PreviousOperator>
+{
+    type Out = Out;
+
+    fn setup(&mut self, metadata: &mut ExecutionMetadata) {
+        self.prev.setup(metadata);
+    }
+
+    fn next(&mut self) -> StreamElement<Out> {
+        let el = self.prev.next();
+        match &el {
+            StreamElement::Timestamped(_, ts) => self.seen.lock().unwrap().push((false, *ts)),
+            StreamElement::Watermark(ts) => self.seen.lock().unwrap().push((true, *ts)),
+            _ => {}
+        }
+        el
     }
 
     fn structure(&self) -> BlockStructure {

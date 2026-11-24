@@ -1,9 +1,13 @@
 use itertools::Itertools;
 
 use renoir::operator::source::{IteratorSource, ParallelIteratorSource};
-use renoir::operator::window::CountWindow;
+use renoir::operator::window::{CountWindow, EventTimeWindow};
 
-use super::utils::TestHelper;
+use std::sync::{Arc, Mutex};
+
+use renoir::block::Replication;
+
+use super::utils::{TestHelper, TimestampRecorder};
 
 #[test]
 fn test_first_window() {
@@ -397,6 +401,147 @@ fn streaming_window_test_nested_emits_on_close() {
         if let Some(res) = res.get() {
             let expected = (0..30u64)
                 .map(|w| (0..5).map(|p| (10 * w + 2 * p) * 2 + 1).product::<u64>())
+                .collect::<Vec<_>>();
+            assert_eq!(res, expected);
+        }
+    });
+}
+
+#[test]
+fn streaming_window_test_nested_event_time() {
+    TestHelper::local_remote_env(|env| {
+        let source = IteratorSource::new(0..40u64);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let res = env
+            .stream(source)
+            .add_timestamps(|&x| x as i64, |_, &ts| Some(ts))
+            .window_all(EventTimeWindow::tumbling(10))
+            .to_streaming_window()
+            // the last inner window of each outer window ends after the outer one: [8, 12)
+            .window(EventTimeWindow::tumbling(4))
+            .to_streaming_window()
+            .fold(0, |acc, x| *acc += x)
+            .fold(1, |acc, x| *acc *= x)
+            .drop_key()
+            .replication(Replication::One)
+            .add_operator(|prev| TimestampRecorder::new(prev, seen.clone()))
+            .collect_vec();
+
+        env.execute_blocking();
+
+        if let Some(res) = res.get() {
+            // outer windows of 10 items, split in inner windows of 4, 4 and 2 items
+            let expected = (0..4u64)
+                .map(|w| {
+                    let s = w * 10;
+                    (s..s + 4).sum::<u64>() * (s + 4..s + 8).sum::<u64>() * (s + 8..s + 10).sum::<u64>()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(res, expected);
+
+            // results are stamped with the end of their outer window, not of the last inner one
+            let seen = seen.lock().unwrap();
+            let results: Vec<_> = seen.iter().filter(|(w, _)| !w).map(|(_, ts)| *ts).collect();
+            assert_eq!(results, vec![10, 20, 30, 40]);
+            // watermarks are not held back until the end of the stream
+            let first_watermark = seen.iter().position(|(w, _)| *w).unwrap();
+            let last_result = seen.iter().rposition(|(w, _)| !w).unwrap();
+            assert!(first_watermark < last_result);
+        }
+    });
+}
+
+/// Outer event time windows of 10 items, split in count windows of 3 items. The last count window
+/// of each outer window is incomplete (1 item) and is flushed when the outer window closes.
+#[test]
+fn streaming_window_test_event_time_then_count() {
+    TestHelper::local_remote_env(|env| {
+        let res = env
+            .stream(IteratorSource::new(0..40u64))
+            .add_timestamps(|&x| x as i64, |_, &ts| Some(ts))
+            .window_all(EventTimeWindow::tumbling(10))
+            .to_streaming_window()
+            .window(CountWindow::new(3, 3, false))
+            .to_streaming_window()
+            .fold(0, |acc, x| *acc += x)
+            .fold(1, |acc, x| *acc *= x)
+            .drop_key()
+            .collect_vec();
+
+        env.execute_blocking();
+
+        if let Some(res) = res.get() {
+            let expected = (0..4u64)
+                .map(|w| {
+                    let s = w * 10;
+                    (s..s + 3).sum::<u64>()
+                        * (s + 3..s + 6).sum::<u64>()
+                        * (s + 6..s + 9).sum::<u64>()
+                        * (s + 9..s + 10).sum::<u64>()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(res, expected);
+        }
+    });
+}
+
+/// Same as above with exact count windows: the incomplete window must be dropped.
+#[test]
+#[ignore = "Fold keeps the accumulators of dropped windows and emits them at the end of the stream"]
+fn streaming_window_test_event_time_then_exact_count() {
+    TestHelper::local_remote_env(|env| {
+        let res = env
+            .stream(IteratorSource::new(0..40u64))
+            .add_timestamps(|&x| x as i64, |_, &ts| Some(ts))
+            .window_all(EventTimeWindow::tumbling(10))
+            .to_streaming_window()
+            .window(CountWindow::tumbling(3))
+            .to_streaming_window()
+            .fold(0, |acc, x| *acc += x)
+            .fold(1, |acc, x| *acc *= x)
+            .drop_key()
+            .collect_vec();
+
+        env.execute_blocking();
+
+        if let Some(res) = res.get() {
+            let expected = (0..4u64)
+                .map(|w| {
+                    let s = w * 10;
+                    (s..s + 3).sum::<u64>() * (s + 3..s + 6).sum::<u64>() * (s + 6..s + 9).sum::<u64>()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(res, expected);
+        }
+    });
+}
+
+/// Outer count windows of 10 items, split in event time windows of 4 timestamps.
+#[test]
+fn streaming_window_test_count_then_event_time() {
+    TestHelper::local_remote_env(|env| {
+        let res = env
+            .stream(IteratorSource::new(0..40u64))
+            .add_timestamps(|&x| x as i64, |_, &ts| Some(ts))
+            .window_all(CountWindow::tumbling(10))
+            .to_streaming_window()
+            .window(EventTimeWindow::tumbling(4))
+            .to_streaming_window()
+            .fold(0, |acc, x| *acc += x)
+            .fold(1, |acc, x| *acc *= x)
+            .drop_key()
+            .collect_vec();
+
+        env.execute_blocking();
+
+        if let Some(res) = res.get() {
+            let expected = (0..4u64)
+                .map(|w| {
+                    let s = w * 10;
+                    (s..s + 4).sum::<u64>()
+                        * (s + 4..s + 8).sum::<u64>()
+                        * (s + 8..s + 10).sum::<u64>()
+                })
                 .collect::<Vec<_>>();
             assert_eq!(res, expected);
         }

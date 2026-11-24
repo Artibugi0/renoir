@@ -99,7 +99,13 @@ pub trait WindowManager: Clone + Send {
 /// relevant active window and the outputs for any window that has been closed after the
 /// input event should be output as return value of the `process` function.
 pub trait WindowTagger: Clone + Send {
-    fn tag<I: Data>(&mut self, el: StreamElement<InnerWindowItem<(), I>>) -> Vec<InnerWindowItem<TagId, I>>;
+    /// Assign `el` to the windows it belongs to, and return the items and closes that result.
+    /// Outputs must carry a timestamp when the windows are based on time (a `Close` is stamped
+    /// with the end of its window), so that further nested windows can use it.
+    fn tag<I: Data>(
+        &mut self,
+        el: StreamElement<InnerWindowItem<(), I>>,
+    ) -> Vec<StreamElement<InnerWindowItem<TagId, I>>>;
 
     /// Return true if the manager has no active windows and can be dropped
     fn recycle(&self) -> bool {

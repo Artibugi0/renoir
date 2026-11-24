@@ -70,6 +70,7 @@ where
     fn route(&mut self, key: K, tag: T, parent: P, el: StreamElement<InnerWindowItem<(), I>>) {
         // a close of the enclosing window resets the tagger: drop it instead of keeping it forever
         let closes = matches!(el.item(), Some(InnerWindowItem::Close { .. }));
+        let ts = el.timestamp().copied();
         let tagger = self
             .tagger
             .windows
@@ -77,15 +78,15 @@ where
             .or_insert_with(|| self.tagger.init.clone());
         let ret = tagger.tag(el);
         self.output_buffer.extend(ret.into_iter().map(|el| {
-            StreamElement::Item(WindowItem::from_parts(key.clone(), parent.clone(), el))
+            el.map(|el| WindowItem::from_parts(key.clone(), parent.clone(), el))
         }));
         if closes {
             self.tagger.windows.remove(&(key.clone(), tag));
             // pass the close on, so the next level can close its own window
-            self.output_buffer.push_back(StreamElement::Item(WindowItem::new_close(
-                key,
-                ChainTag::parent_tag(parent),
-            )));
+            self.output_buffer.push_back(StreamElement::new_item(
+                WindowItem::new_close(key, ChainTag::parent_tag(parent)),
+                ts,
+            ));
         }
     }
 
@@ -96,7 +97,7 @@ where
             let ret = tagger.tag(el.as_system().expect("not an item"));
             let parent = parent_of(tag);
             self.output_buffer.extend(ret.into_iter().map(|el| {
-                StreamElement::Item(WindowItem::from_parts(key.clone(), parent.clone(), el))
+                el.map(|el| WindowItem::from_parts(key.clone(), parent.clone(), el))
             }));
             !tagger.recycle()
         });
@@ -126,7 +127,6 @@ where
             }
             match self.prev.next() {
                 el @ (StreamElement::Item(_) | StreamElement::Timestamped(..)) => {
-                    // TODO: Handle timestamps
                     let (key, el) = el.take_key();
                     let el = el.map(|el| InnerWindowItem::new_item((), el));
                     self.route(key.unwrap(), (), NoTag, el);
@@ -166,7 +166,6 @@ where
             }
             match self.prev.next() {
                 el @ (StreamElement::Item(_) | StreamElement::Timestamped(..)) => {
-                    // TODO: Handle timestamps
                     let item = el.item().unwrap();
                     let (key, tag) = (item.key().clone(), item.tag().clone());
                     self.route(key, tag.clone(), tag, el.map(WindowItem::strip));

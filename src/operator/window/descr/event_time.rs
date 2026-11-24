@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+use nanorand::{Rng, WyRand};
+
 use super::super::*;
 use crate::operator::{Data, StreamElement, Timestamp};
 
@@ -141,6 +143,110 @@ impl<T: Data> WindowDescription<T> for EventTimeWindow {
             last_watermark: Default::default(),
             ws: Default::default(),
         }
+    }
+}
+
+// Streaming
+
+impl StreamingWindowDescription for EventTimeWindow {
+    type Tagger = EventTimeWindowTagger;
+
+    fn build_tagger(&self) -> Self::Tagger {
+        EventTimeWindowTagger {
+            size: self.size,
+            slide: self.slide,
+            last_watermark: Default::default(),
+            rng: WyRand::new(),
+            ws: Default::default(),
+        }
+    }
+}
+
+pub struct EventTimeWindowTagger {
+    size: Timestamp,
+    slide: Timestamp,
+    last_watermark: Option<Timestamp>,
+    rng: WyRand,
+    ws: VecDeque<Slot<TagId>>,
+}
+
+impl Clone for EventTimeWindowTagger {
+    fn clone(&self) -> Self {
+        Self {
+            size: self.size,
+            slide: self.slide,
+            last_watermark: Default::default(),
+            rng: WyRand::new(),
+            ws: Default::default(),
+        }
+    }
+}
+
+impl EventTimeWindowTagger {
+    fn alloc_windows(&mut self, ts: Timestamp) {
+        assert!(self.last_watermark.map(|w| ts >= w).unwrap_or(true));
+
+        while self.ws.back().map(|b| b.start < ts).unwrap_or(true) {
+            let mut next_start = self.ws.back().map(|b| b.start + self.slide).unwrap_or(ts);
+            // Skip empty windows
+            if let Some(w) = self.last_watermark {
+                next_start += (w - next_start).max(0) / self.slide * self.slide
+            }
+
+            log::trace!("New window {}..{}", next_start, next_start + self.size);
+            self.ws.push_back(Slot::new(
+                self.rng.generate(),
+                next_start,
+                next_start + self.size,
+            ));
+        }
+    }
+}
+
+impl WindowTagger for EventTimeWindowTagger {
+    fn tag<I: Data>(
+        &mut self,
+        el: StreamElement<InnerWindowItem<(), I>>,
+    ) -> Vec<StreamElement<InnerWindowItem<TagId, I>>> {
+        match el {
+            StreamElement::Timestamped(InnerWindowItem::Item { item, .. }, ts) => {
+                self.alloc_windows(ts);
+                self.ws
+                    .iter_mut()
+                    .skip_while(|w| w.end <= ts)
+                    .take_while(|w| w.start <= ts)
+                    .map(|w| {
+                        w.active = true;
+                        StreamElement::Timestamped(InnerWindowItem::new_item(w.acc, item.clone()), ts)
+                    })
+                    .collect()
+            }
+            StreamElement::Watermark(ts) => {
+                self.last_watermark = Some(ts);
+                let split = self.ws.partition_point(|w| w.end < ts);
+                self.ws
+                    .drain(..split)
+                    .filter(|w| w.active)
+                    .map(|w| StreamElement::Timestamped(InnerWindowItem::new_close(w.acc), w.end))
+                    .collect()
+            }
+            StreamElement::Timestamped(InnerWindowItem::Close { .. }, _)
+            | StreamElement::FlushAndRestart
+            | StreamElement::Terminate => self
+                .ws
+                .drain(..)
+                .filter(|w| w.active)
+                .map(|w| StreamElement::Timestamped(InnerWindowItem::new_close(w.acc), w.end))
+                .collect(),
+            StreamElement::Item(_) => {
+                panic!("Event time windows can only handle timestamped items!")
+            }
+            StreamElement::FlushBatch => Vec::new(),
+        }
+    }
+
+    fn recycle(&self) -> bool {
+        self.ws.is_empty()
     }
 }
 
